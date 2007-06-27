@@ -1,0 +1,83 @@
+#summary Introduction
+
+= Introduction =
+
+Here are some initial thoughts about what a bridge might entail.
+
+
+= Details =
+
+== Posted by Xavier Leroy in the ocaml-list mailing list on 2007-06-25 ==
+
+I haven't looked closely at the Erlang interop facilities, but I think it is doable.  Here are some remarks based on previous interoperability experiences with Caml.
+
+The first step is to find a good mapping between data structures of the two languages.  When both are statically typed, this can be difficult as both type systems try to impose their views.
+When at least one of the languages is dynamically typed, it's easier.
+
+One approach is to define a Caml datatype that reflects the "universal" type of the dynamically-typed language, e.g. S-exprs in the case of Lisp, and provide low-level interface functions to exchange values of this type.
+
+Conversions between this Caml representation of the universal type and regular Caml data structures can be written manually in Caml, or maybe automatically generated in the style of Markus Mottl's Sexplib tool or Jeremy Yallop's Deriving mechanism.
+
+Function values can be difficult to exchange in both directions.  It might be possible to encapsulate Erlang functions as an abstract Caml type, with an appropriate "apply" primitive.  I don't know if this can be made to work in the other direction, e.g. encapsulate Caml functions as some opaque thing on the Erlang side.  At any rate, for many applications, exchange of first-order data structures can be enough.
+
+If the Caml code and the Erlang code live in the same address space, the actual exchange of data can be done through the C interfaces of both languages.  This is what we did for the Caml/Java interface, going through the Java Native Interface and OCaml's C interface.
+The two GC can be made to cooperate.  However, data cycles that spawn the two heaps will never be garbage-collected.
+
+As others mentioned, it is possible to encapsulate Caml code and the Caml runtime system as a DLL, at least for x86 under Linux and Windows.
+For the Caml/Java interface, we used the reverse embedding: the Caml code would link with the Java runtime system (as a library), which would then load the Java code.
+
+Apparently, Erlang makes it possible to communicate between separate processes using byte streams.  This is an original feature that could significantly simplify the interface: the Caml side could be written entirely in Caml, bypassing low-level C interface code.
+
+I guess that's all I can say at this point, but feel free to ask questions.
+
+- Xavier Leroy
+
+== Response by Ulf Wiger 2007-06-25 ==
+
+One might also have a look at the Erlang binary type. (:
+
+Actually, this is not as corny as it sounds.
+You could pass a parsing declaration in the form of Erlang bit syntax expressions, and compile an encode/decode module on the fly on the Erlang side.
+
+Examples of the bit syntax can be found here:
+http://www.erlang.org//doc/programming_examples/bit_syntax.html#4
+
+And there's a (currently experimental) new version of binary handling called "binary comprehensions"
+(c.f. list comprehensions, but on bits or bytes)
+
+http://user.it.uu.se/~pergu/papers/erlang05.pdf
+
+Here's a very small example of decoding with the help of binary comprehensions, from above paper:
+
+{{{
+uudecode(UUencodedBin) ->
+<<(X-32):6 || X <<- UUencodedBin, 32=<X, X=<95>>.
+}}}
+
+The native code compiler in Erlang understands the bit syntax and optimizes the matching, so working directly on binary objects in Erlang is both reasonably expressive and quite efficient.
+
+Large binaries are reference-counted in Erlang, and passed by pointer reference between processes (under the covers - conceptually, they're copied).
+
+{{{
+> Function values can be difficult to exchange in both directions.  It 
+> might be possible to encapsulate Erlang functions as an abstract Caml 
+> type, with an appropriate "apply" primitive.  I don't know if this can 
+> be made to work in the other direction, e.g. encapsulate Caml 
+> functions as some opaque thing on the Erlang side.  At any rate, for 
+> many applications, exchange of first-order data structures can be 
+> enough.
+}}}
+
+Function values are only passed by reference between erlang nodes, so evaluating them only works if the right module is loaded on the remote end (a hash value is passed along to ensure that the wrong function isn't
+evaluated.) Even if it can't be evaluated, it can of course be passed along as an opaque value.
+
+If this representation were used when communicating, it might be possible (but perhaps quite strange) to represent OCaml functions in the same way, such that they cannot be confused with Erlang functions.
+
+This would make it possible to pass function values by reference between the two environments, but each reference would only actually be callable in its native environment.
+
+In order to send an OCaml function value through the Erlang environment to an OCaml recipient, I guess an appropriate encapsulation is needed, which would look like a binary object to the Erlang side.
+
+== Comment by Serge Aleynikov, 2007-06-25 ==
+
+While using serialized streams of data between processes is the easiest interoperability approach it is also the slowest of the two supported by Erlang run-time.  In the second approach that uses the same address space Erlang maintains a pool of OS threads separate from the ones executing Erlang byte-code that can be used to make asynchronous blocking calls of C functions.  If this model is used as far as I understand separate Caml run-times would have to be initialized per pooled thread managed by Erlang.  Otherwise garbage collection on the Caml side (that uses a single mutex) would block all pooled OS threads currently executing Caml closures while being garbage collected that would penalize performance.  Is this a feasible approach?  Would it lead to too much of memory overhead?  (Erlang doesn't have the same issue because user-level light-weight processes don't share heaps and garbage collection happens on a light-weight process level without stalling other processes).
+
