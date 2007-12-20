@@ -2,10 +2,17 @@ let get_host_addr () =
     let hosts = Unix.gethostbyname(Unix.gethostname()) in
     hosts.Unix.h_addr_list.(0)
 
-let client_addr sock =
-    match sock with
+let inet_addr sock =
+    match Unix.getsockname sock with
+        Unix.ADDR_INET(host_inet_addr, port) ->
+            (host_inet_addr, port)
+        | _ -> failwith "not an inet address (file descriptor)"
+
+let client_addr fd =
+    match fd with
         Unix.ADDR_INET(host,_) -> Unix.string_of_inet_addr host
         | _ -> "Unexpected client"
+
 
 let make_handler f id sd =
     (*TODO could have a handler type ...*)
@@ -36,12 +43,16 @@ let rec acceptor id sock handler =
     handler id sd;
     acceptor (id + 1) sock handler
 
-let serve port handler =
+let listen port =
     let addr = get_host_addr() in
     let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
     Unix.setsockopt sock Unix.SO_REUSEADDR true;
     Unix.bind sock (Unix.ADDR_INET(addr, port));
     Unix.listen sock 3;
+    sock
+
+let serve port handler =
+    let sock = listen port in
     Printf.printf "Listening on port %i" port;
     print_newline ();
     try

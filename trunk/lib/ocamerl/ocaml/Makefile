@@ -1,13 +1,16 @@
 LIB_TARGET_NAME=oe
 LIB_TARGET=${LIB_TARGET_NAME}.cma
 LIB_SOURCES=\
+	trace.ml\
+	tools.ml\
+	eterm.ml\
 	fifo.ml\
 	serv.ml\
-	eterm.ml
+	epmc.ml\
+	enode.ml
 LIB_OBJECTS=${LIB_SOURCES:.ml=.cmo}
 
-EXE_SOURCES=\
-	ex/double.ml
+EXE_SOURCES=$(wildcard ex/*.ml)
 EXE_OBJECTS=${EXE_SOURCES:.ml=.cmo}
 EXE_TARGETS=${EXE_SOURCES:.ml=}
 
@@ -24,6 +27,8 @@ all: .depends ${LIB_TARGET} ${EXE_TARGETS} otop
 
 ${LIB_TARGET}: ${LIB_OBJECTS}
 	ocamlc -a -o ${LIB_TARGET} ${LIB_OBJECTS}
+
+${EXE_TARGETS}: ${LIB_TARGET}
 
 otop:
 	ocamlmktop -o otop ${OCAMLC_OPT} ${LIB_TARGET} -cclib -lthreads
