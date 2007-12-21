@@ -2,7 +2,7 @@ let send sock_addr t =
     let ic, oc = Unix.open_connection sock_addr in
     output_string oc (Eterm.to_binary t);
     flush oc;
-    print_endline "sent";
+    print_endline "OCAML.Double: Sent!";
     Unix.shutdown_connection ic
 
 let rec transform t =
@@ -19,8 +19,8 @@ let term sock_addr t =
     let newT = transform t in
     let newS = Eterm.to_string newT in
     let newB = Eterm.to_binary newT in
-    Printf.printf "Transformed term: %s\n" newS;
-    Printf.printf "Transformed binary form: %s\n" (Eterm.EBinary.to_string newB);
+    Printf.printf "OCAML.Double: Transformed term: %s\n" newS;
+    Printf.printf "OCAML.Double: Transformed binary form: %s\n" (Eterm.EBinary.to_string newB);
     flush_all ();
     (* send back the transformed term *)
     send sock_addr newT
@@ -29,8 +29,8 @@ let rec erl_terms f connection_id istream oc =
     let t = Eterm.of_stream istream in
     let s = Eterm.to_string t in
     let b = Eterm.to_binary t in
-    Printf.printf "Read term: %s\n" s;
-    Printf.printf "Binary form: %s\n" (Eterm.EBinary.to_string b);
+    Printf.printf "OCAML.Double: Read term: %s\n" s;
+    Printf.printf "OCAML.Double: Binary form: %s\n" (Eterm.EBinary.to_string b);
     flush_all ();
     f t;
     erl_terms f connection_id istream oc
@@ -43,7 +43,7 @@ let erl_handler f id fd =
         erl_terms f id istream oc
     with
         Stream.Failure ->
-            print_endline "Stream failure (connection closed?)"
+            print_endline "OCAML.Double: Stream failure (connection closed?)"
 
 
 let main () =

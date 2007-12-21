@@ -19,17 +19,17 @@ let make_handler f id sd =
     begin
         try
             f id sd
-        with exn -> Printf.printf "ERROR:handler exec:%s\n" (Printexc.to_string exn)
+        with exn -> Printf.printf "OCAML.Serv: ERROR:handler exec:%s\n" (Printexc.to_string exn)
     end;
     try
         Unix.close sd
-    with exn -> Printf.printf "ERROR:handler finalizer:%s\n" (Printexc.to_string exn)
+    with exn -> Printf.printf "OCAML.Serv: ERROR:handler finalizer:%s\n" (Printexc.to_string exn)
 
 let trace_handler handler id sd =
-    Printf.printf "TRACE: handle connection %i" id;
+    Printf.printf "OCAML.Serv: TRACE: handle connection %i" id;
     print_newline ();
     let r = handler id sd in
-    Printf.printf "TRACE: end of connection %i" id;
+    Printf.printf "OCAML.Serv: TRACE: end of connection %i" id;
     print_newline ();
     r
 
@@ -38,7 +38,7 @@ let handle_in_thread handler id sd =
 
 let rec acceptor id sock handler =
     let (sd, sa) = Unix.accept sock in 
-    Printf.printf "TRACE: new connection from %s" (client_addr sa) ;
+    Printf.printf "OCAML.Serv: new connection from %s" (client_addr sa) ;
     print_newline ();
     handler id sd;
     acceptor (id + 1) sock handler
@@ -53,12 +53,12 @@ let listen port =
 
 let serve port handler =
     let sock = listen port in
-    Printf.printf "Listening on port %i" port;
+    Printf.printf "OCAML.Serv: listening on port %i" port;
     print_newline ();
     try
         acceptor 0 sock handler
     with
         exn ->
-            Printf.printf "ERROR: exception in acceptor";
+            Printf.printf "OCAML.Serv: ERROR: exception in acceptor";
             print_newline ()
 
