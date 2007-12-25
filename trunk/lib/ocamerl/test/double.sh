@@ -1,3 +1,4 @@
+#!/bin/bash
 EXIT=0
 
 echo; echo "Test $0: Run an erlang node which will interact with ocaml server"

@@ -69,12 +69,12 @@ let main () =
         )
         "Serve a raw socket connection."
     ;
-    (*
-    serve !port (handle_in_thread (trace_handler (make_handler echo)))
-    *)
-    let addr = (Unix.gethostbyname(Unix.gethostname())).Unix.h_addr_list.(0) in
+    Trace.init ();
+    let addr = Serv.get_host_addr () in
     let sock_addr = Unix.ADDR_INET(addr, !sendPort) in
-    Serv.serve !recvPort (Serv.trace_handler (Serv.make_handler (erl_handler (term sock_addr))))
+    let core_handler = erl_handler (term sock_addr) in
+    let handler = Serv.trace_handler (Serv.make_handler core_handler) in
+    Serv.serve !recvPort handler
 
 let _ = main ()
 

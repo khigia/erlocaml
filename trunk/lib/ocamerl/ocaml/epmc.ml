@@ -27,7 +27,7 @@ and tag_parse tag =
     match tag with
         | n when n = tag_alive2_rsp -> parse_alive2_rsp
         | _ ->
-            failwith "message tag not recognized" (*TODO dump *)
+            failwith "message tag not recognized"
 
 and parse_alive2_rsp =
     parser [< result = eint 1; creation = eint 2 >] ->
@@ -83,7 +83,7 @@ type t = {
     epmdPort: int;
     nodeServerName: string;
     nodeServerPort: int;
-    permanentConnection: Thread.t option;
+    mutable permanentConnection: Thread.t option;
 }
 
 
@@ -120,62 +120,108 @@ let make nodeServerName nodeServerPort = {
 let stop_event = Event.new_channel ()
 let published_event = Event.new_channel ()
 
+let _receive_message istream =
+    try
+        message_of_stream istream
+    with
+        Stream.Failure ->
+            Stream.dump print_char istream;
+            failwith "got stream failure"
+
+let _received_message msg =
+    Trace.debug (lazy (Trace.printf
+        "Got message: %s\n"
+        (message_to_string msg)
+    ));
+    msg
+
+let rec _receive_message_loop istream =
+    let msg = _receive_message istream in
+    let _ = _received_message msg in
+    _receive_message_loop istream
+
 let alive2_connection epmc =
+    (* TODO sync on event ... difficult to handle failure cases*)
     let ic, oc = (try
         let addr = (Unix.gethostbyname(epmc.epmdName)).Unix.h_addr_list.(0) in
         let sock_addr = Unix.ADDR_INET(addr, epmc.epmdPort) in
         Unix.open_connection sock_addr
     with
         Unix.Unix_error(_, _, _) ->
-            Trace.debug (lazy (Trace.printf "Sync on sending published_event\n"));
-            let publishedEvent = Event.send published_event false in
+            Trace.debug (lazy (Trace.printf
+                "Sync on sending published_event\n"
+            ));
+            let publishedEvent = Event.send published_event None in
             Event.sync publishedEvent;
-            Trace.debug (lazy (Trace.printf "Prematured end of EPM connection\n"));
+            Trace.debug (lazy (Trace.printf
+                "Prematured end of EPM connection\n"
+            ));
             failwith "Unix error cause end of thread"
     ) in
-    let stopEvent = Event.receive stop_event in
     let req = make_alive2_req epmc in
     let pack = pack_msg req in
-    Trace.debug (lazy (Trace.printf "Generated Alive2Req: %s\n" (Tools.dump_dec pack "<<" ">>")));
+    Trace.debug (lazy (Trace.printf
+        "Generated Alive2Req: %s\n"
+        (Tools.dump_dec pack "<<" ">>")
+    ));
     output_string oc pack;
     flush oc;
-    Trace.debug (lazy (Trace.printf "Sent Alive2Req\n"));
+    Trace.debug (lazy (Trace.printf
+        "Sent Alive2Req\n"
+    ));
     let istream = Stream.of_channel ic in
-    let msg =
-        try
-            message_of_stream istream
-        with
-            Stream.Failure ->
-                Stream.dump print_char istream;
-                failwith "got stream failure"
-    in
-    Trace.debug (lazy (Trace.printf "Got message: %s\n" (message_to_string msg)));
+    let msg = _receive_message istream in
+    let _ = _received_message msg in
     (match msg with
-        | Msg_alive2_rsp (0, _) ->
-            Trace.debug (lazy (Trace.printf "Sync on sending published_event\n"));
-            let publishedEvent = Event.send published_event true in
-            Event.sync publishedEvent;
-            Trace.debug (lazy (Trace.printf "Sync on receiving stop_event\n"));
+        | Msg_alive2_rsp (0, creation) ->
+            Trace.debug (lazy (Trace.printf
+                "Sync on sending published_event\n"
+            ));
+            let evt = Event.send
+                published_event (Some creation)
+            in
+            Event.sync evt;
+            Trace.debug (lazy (Trace.printf
+                "Sync on receiving stop_event\n"
+            ));
+            let thr = Thread.create _receive_message_loop istream in
+            let stopEvent = Event.receive stop_event in
             ignore (Event.sync stopEvent)
+            (* not implemented??? Thread.kill thr *)
         | _ ->
-            Trace.debug (lazy (Trace.printf "Sync on sending published_event\n"));
-            let publishedEvent = Event.send published_event false in
-            Event.sync publishedEvent
+            Trace.debug (lazy (Trace.printf 
+                "Sync on sending published_event\n"
+            ));
+            let evt = Event.send published_event None in
+            Event.sync evt
     );
     Unix.shutdown_connection ic;
-    Trace.debug (lazy (Trace.printf "End of EPM connection\n"))
+    Trace.debug (lazy (Trace.printf
+        "End of EPM connection\n"
+    ))
 
 let connect epmc =
     (* TODO connect only if not yet connected *)
-    Trace.info (lazy (Trace.printf "Epmc connecting to EPMD(%s, %i) for node '%s' listening on port %i\n" epmc.epmdName epmc.epmdPort epmc.nodeServerName epmc.nodeServerPort));
+    Trace.info (lazy (Trace.printf
+        "Epmc connecting to EPMD(%s, %i) for node '%s' listening on port %i\n"
+        epmc.epmdName
+        epmc.epmdPort
+        epmc.nodeServerName
+        epmc.nodeServerPort
+    ));
     let thr = Thread.create alive2_connection epmc in
-    Trace.debug (lazy (Trace.printf "Sync on receiving published_event\n"));
+    Trace.debug (lazy (Trace.printf
+        "Sync on receiving published_event\n"
+    ));
     let publishedEvent = Event.receive published_event in
-    match Event.sync publishedEvent with
-        | true ->
-            (true, {epmc with permanentConnection = Some thr})
-        | false ->
-            (false, epmc)
+    let result = Event.sync publishedEvent in
+    (match result with
+        | Some creation ->
+            ignore(epmc.permanentConnection <- Some thr)
+        | None ->
+            ()
+    );
+    result
 
 let disconnect epmc =
     match epmc.permanentConnection with
@@ -184,7 +230,8 @@ let disconnect epmc =
             let stopEvent = Event.send stop_event "closing" in
             Event.sync stopEvent;
             Thread.join thr;
-            {epmc with permanentConnection = None}
+            epmc.permanentConnection <- None;
+            ()
         | None ->
-            epmc
+            ()
 

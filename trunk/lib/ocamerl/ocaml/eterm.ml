@@ -44,16 +44,66 @@ module ETuple =
                     ))
     end
 
+module ETupler = functor(ET: sig
+        type t
+        val to_string : t -> string
+        val to_chars : t -> char list
+    end ) ->
+    struct
+        type t = ET.t array
+
+        let make l = Array.of_list l
+
+        let fold_left f i t =
+            Array.fold_left f i t
+
+        let to_string tuple =
+            fold_left (fun s e -> s ^ (ET.to_string e) ^ ",") "" tuple
+        
+        let to_chars tuple =
+            match (Array.length tuple) < 256 with
+                | true ->
+                    magic_small_tuple :: ( (char_of_int (Array.length tuple)) :: (
+                        fold_left (fun acc e -> acc @ (ET.to_chars e)) [] tuple
+                    ))
+                | false ->
+                    magic_large_tuple :: ( (Tools.chars_of_int (Array.length tuple) [] 4) @ (
+                        fold_left (fun acc e -> acc @ (ET.to_chars e)) [] tuple
+                    ))
+    end
+
 
 type eterm =
     | ET_int of Int32.t
     | ET_float of float
-    | ET_atom of string
+    | ET_atom of e_atom
     | ET_bool of bool
-    | ET_tuple of eterm ETuple.t
+    | ET_tuple of e_tuple
     | ET_string of string
     | ET_list of eterm list
     | ET_improper_list of eterm list * eterm
+    | ET_pid of e_pid
+and e_atom = string
+and e_tuple = eterm ETuple.t
+    (*TODO should be possible to define Tuple with a functor:
+    Tupler(struct type eterm val to_string: eterm -> string end)
+    so that using the tuple is easier: no need to pass the
+    to_string or to_chars functions each time
+    ... but then to_string and to_chars need to be define first! argh!!!
+    *)
+and e_pid = 
+        e_atom (* node name *)
+        * int  (* pid number *)
+        * int  (* serial number *)
+        * int  (* node creation ID *)
+
+let make_pid nodeName pid_num serial creation =
+    (
+        nodeName,
+        pid_num,
+        serial,
+        creation
+    )
 
 let rec to_string t = match t with
     | ET_int n   -> Int32.to_string n
@@ -66,6 +116,13 @@ let rec to_string t = match t with
         (List.fold_left (fun acc e -> acc ^ (to_string e) ^ ",") "[" s) ^ "]"
     | ET_improper_list (head, tail) ->
         (List.fold_left (fun acc e -> acc ^ to_string e) "[" head) ^ (to_string tail) ^ "]"
+    | ET_pid (nodeName, pidNum, pidSerial, nodeCreation) ->
+        Printf.sprintf
+            "PID(%s, %i, %i, %i)"
+            nodeName
+            pidNum
+            pidSerial
+            nodeCreation
 
 let rec to_chars t =
     match t with

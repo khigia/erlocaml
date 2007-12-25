@@ -16,49 +16,71 @@ let client_addr fd =
 
 let make_handler f id sd =
     (*TODO could have a handler type ...*)
-    begin
-        try
-            f id sd
-        with exn -> Printf.printf "OCAML.Serv: ERROR:handler exec:%s\n" (Printexc.to_string exn)
-    end;
+    let _ = try
+        f id sd
+    with
+        exn ->
+            Trace.printf
+                "ERROR:handler of coonection %i: %s\n"
+                id
+                (Printexc.to_string exn);
+    in
     try
         Unix.close sd
-    with exn -> Printf.printf "OCAML.Serv: ERROR:handler finalizer:%s\n" (Printexc.to_string exn)
+    with
+        exn ->
+            Trace.printf
+                "ERROR:handler finalizer:%s\n"
+                (Printexc.to_string exn)
 
 let trace_handler handler id sd =
-    Printf.printf "OCAML.Serv: TRACE: handle connection %i" id;
+    Trace.printf "Handle connection %i" id;
     print_newline ();
     let r = handler id sd in
-    Printf.printf "OCAML.Serv: TRACE: end of connection %i" id;
+    Trace.printf "End of connection %i" id;
     print_newline ();
     r
 
-let handle_in_thread handler id sd =
-    ignore (Thread.create (fun () -> handler id sd) ())
-
-let rec acceptor id sock handler =
-    let (sd, sa) = Unix.accept sock in 
-    Printf.printf "OCAML.Serv: new connection from %s" (client_addr sa) ;
-    print_newline ();
-    handler id sd;
-    acceptor (id + 1) sock handler
+let handle_in_thread f id sd =
+    Thread.create (fun () -> f id sd) ()
 
 let listen port =
-    let addr = get_host_addr() in
+    let addr = get_host_addr () in
     let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
     Unix.setsockopt sock Unix.SO_REUSEADDR true;
-    Unix.bind sock (Unix.ADDR_INET(addr, port));
+    let inet_addr = Unix.ADDR_INET(addr, port) in
+    Unix.bind sock inet_addr;
     Unix.listen sock 3;
     sock
 
+let accept_once id sock handler =
+    Trace.debug (lazy (Trace.printf
+        "Blocked on accept\n"
+    ));
+    Trace.flush;
+    let (sd, sa) = Unix.accept sock in 
+    Trace.debug (lazy (Trace.printf
+        "New connection from %s\n"
+        (client_addr sa)
+    ));
+    print_endline "";
+    handler id sd
+
+let rec accept_loop id sock handler_f =
+    let _ = accept_once id sock handler_f in
+    accept_loop (id + 1) sock handler_f
+
 let serve port handler =
     let sock = listen port in
-    Printf.printf "OCAML.Serv: listening on port %i" port;
+    Trace.printf "Server listening on port %i" port;
     print_newline ();
     try
-        acceptor 0 sock handler
+        accept_loop
+            0
+            sock
+            handler
     with
         exn ->
-            Printf.printf "OCAML.Serv: ERROR: exception in acceptor";
+            Trace.printf "ERROR: exception in server";
             print_newline ()
 

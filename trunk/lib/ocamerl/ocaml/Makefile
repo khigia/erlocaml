@@ -1,5 +1,6 @@
 LIB_TARGET_NAME=oe
 LIB_TARGET=${LIB_TARGET_NAME}.cma
+LIB_INTERFACES=
 LIB_SOURCES=\
 	trace.ml\
 	tools.ml\
@@ -16,12 +17,12 @@ EXE_TARGETS=${EXE_SOURCES:.ml=}
 
 OCAMLC_OPT=-pp 'camlp4o' -thread unix.cma threads.cma
 
-.PHONY: all clean doc
+.PHONY: all clean doc test
 
 all: .depends ${LIB_TARGET} ${EXE_TARGETS} otop
 
-.depends: ${LIB_SOURCES} ${EXE_SOURCES}
-	ocamldep -pp 'camlp4o' ${LIB_SOURCES} ${EXE_SOURCES} > .depends
+.depends: ${LIB_INTERFACES} ${LIB_SOURCES} ${EXE_SOURCES}
+	ocamldep -pp 'camlp4o' ${LIB_INTERFACES} ${LIB_SOURCES} ${EXE_SOURCES} > .depends
 
 -include .depends
 
@@ -52,3 +53,6 @@ clean:
 	-rm -f ${EXE_OBJECTS:.cmo=.cmi} ${EXE_OBJECTS} ${EXE_TARGETS}
 	-rm -f .depends
 	-rm -rf html
+
+test:
+	find test/ -perm /a+x ! -type d -exec \{} \;
