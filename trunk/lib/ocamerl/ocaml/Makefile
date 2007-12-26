@@ -4,10 +4,12 @@ LIB_INTERFACES=
 LIB_SOURCES=\
 	trace.ml\
 	tools.ml\
-	eterm.ml\
 	fifo.ml\
+	fsm.ml\
 	serv.ml\
+	eterm.ml\
 	epmc.ml\
+	econn.ml\
 	enode.ml
 LIB_OBJECTS=${LIB_SOURCES:.ml=.cmo}
 

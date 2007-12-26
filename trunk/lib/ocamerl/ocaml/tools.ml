@@ -38,11 +38,12 @@ let rec int_of_chars chars r =
             r
 
 let rec int32_of_chars chars r =
+    (* use logical op to avoid signedness problem *)
     match chars with
         | b::rest ->
             int32_of_chars rest (
-                Int32.add
-                    (Int32.mul r 256l)
+                Int32.logor
+                    (Int32.shift_left r 8)
                     (Int32.of_int (int_of_char b))
             )
         | [] ->
@@ -56,11 +57,12 @@ let rec chars_of_int v chars n =
             if v == 0 then chars else failwith "integer too big"
 
 let rec chars_of_int32 v chars n =
+    (* use logical op to avoid signedness problem *)
     match n > 0 with
         | true ->
             chars_of_int32
                 (Int32.shift_right_logical v 8)
-                ((char_of_int (Int32.to_int (Int32.rem v 256l)))::chars)
+                ((char_of_int (Int32.to_int (Int32.logand v 0xFFl)))::chars)
                 (n - 1)
         | false ->
             if Int32.compare v Int32.zero == 0 then chars else failwith (Printf.sprintf "integer too big? rest=%s" (Int32.to_string v))
