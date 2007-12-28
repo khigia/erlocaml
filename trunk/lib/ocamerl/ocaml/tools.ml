@@ -30,24 +30,28 @@ let float_of_padded_string s =
         Not_found ->
             float_of_string s
 
-let rec int_of_chars chars r =
-    match chars with
-        | b::rest ->
-            int_of_chars rest (r * 256 + (int_of_char b))
-        | [] ->
-            r
+let int_of_chars chars =
+    List.fold_left
+        (fun acc c ->
+            (acc lsl 8) lor ((int_of_char c) land 0xFF)
+        )
+        0
+        chars
 
-let rec int32_of_chars chars r =
+let int_x_of_chars x chars =
+    let full = int_of_chars chars in
+    full land ((1 lsl x) - 1)
+
+let int32_of_chars chars =
     (* use logical op to avoid signedness problem *)
-    match chars with
-        | b::rest ->
-            int32_of_chars rest (
-                Int32.logor
-                    (Int32.shift_left r 8)
-                    (Int32.of_int (int_of_char b))
-            )
-        | [] ->
-            r
+    List.fold_left
+        (fun acc c ->
+            Int32.logor
+                (Int32.shift_left acc 8)
+                (Int32.logand (Int32.of_int (int_of_char c)) 0xFFl)
+        )
+        Int32.zero
+        chars
 
 let rec chars_of_int v chars n =
     match n > 0 with
@@ -75,5 +79,24 @@ let dump_dec str initStr endStr =
             | [] -> s
     in
     (l_to_s l initStr) ^ endStr
+
+let dump_hex str initStr endStr sep =
+    let l = explode str in
+    let rec l_to_s chars s c =
+        match chars with
+            | h::t ->
+                l_to_s
+                    t
+                    (Printf.sprintf
+                        "%s%.2X%s"
+                        s
+                        (int_of_char h)
+                        c
+                    )
+                    c
+            | [] ->
+                s
+    in
+    (l_to_s l initStr sep) ^ endStr
 
 

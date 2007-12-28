@@ -3,7 +3,7 @@ try
     let _ = Trace.info (lazy (Trace.printf
         "Creating node\n"
     )) in
-    let n = Enode.make "ocaml@affle-laptop" in
+    let n = Enode.make "ocaml@devhost" in
     let _ = Enode.trace "    " n in
 
     let _ = Trace.info (lazy (Trace.printf
@@ -34,8 +34,10 @@ try
     let mbox = Enode.create_mbox n in
     let _ = Enode.trace "    " n in
 
-    let _ = flush_all in
-    let _ = Trace.flush in
+    let _ = Trace.flush () in
+
+    Thread.join n.Enode.server.Econn.thread
+    (*
     let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in
     (*
     let _ = Enode.loop n in
@@ -48,5 +50,6 @@ try
     let _ = Enode.unpublish n in
     let _ = Enode.trace "    " n in
     ()
+    *)
 with
     exn -> Printf.printf "ERROR:%s\n" (Printexc.to_string exn)

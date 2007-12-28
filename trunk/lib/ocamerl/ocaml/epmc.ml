@@ -34,7 +34,7 @@ and parse_alive2_rsp =
         Msg_alive2_rsp (result, creation)
 
 and eint n =
-  parser [< s = Tools.nnext n [] >] -> Tools.int_of_chars s 0
+  parser [< s = Tools.nnext n [] >] -> Tools.int_of_chars s
 
 
 let message_to_string msg = match msg with

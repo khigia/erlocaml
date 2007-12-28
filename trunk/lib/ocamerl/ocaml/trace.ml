@@ -19,8 +19,7 @@ let printf f =
     let fmt = "Thread %i: " ^^ f in
     Printf.printf fmt thrID
 
-let flush =
-    flush stdout;
-    Printf.printf "%!"
+let flush () =
+    flush stdout
 
 

@@ -1,13 +1,16 @@
 let magic_version      = '\131'
-let magic_small_int    = '\097'
-let magic_large_int    = '\098'
-let magic_float        = '\099'
-let magic_atom_or_bool = '\100'
-let magic_small_tuple  = '\104'
-let magic_large_tuple  = '\105'
-let magic_nil          = '\106'
-let magic_string       = '\107'
-let magic_list         = '\108'
+
+let magic_small_int     = '\097'
+let magic_large_int     = '\098'
+let magic_float         = '\099'
+let magic_atom_or_bool  = '\100'
+let magic_pid           = '\103'
+let magic_small_tuple   = '\104'
+let magic_large_tuple   = '\105'
+let magic_nil           = '\106'
+let magic_string        = '\107'
+let magic_list          = '\108'
+let magic_new_reference = '\114'
 
 
 module EBinary =
@@ -83,6 +86,10 @@ type eterm =
     | ET_list of eterm list
     | ET_improper_list of eterm list * eterm
     | ET_pid of e_pid
+    | ET_ref of
+          e_atom
+        * Int32.t list
+        * int          (* creation *)
 and e_atom = string
 and e_tuple = eterm ETuple.t
     (*TODO should be possible to define Tuple with a functor:
@@ -123,6 +130,16 @@ let rec to_string t = match t with
             pidNum
             pidSerial
             nodeCreation
+    | ET_ref (node, idList, creation) ->
+        Printf.sprintf
+            "Ref(%s, %s, %i)"
+            node
+            (List.fold_left
+                (fun acc e -> Printf.sprintf "%s%lu" acc e)
+                ""
+                idList
+            )
+            creation
 
 let rec to_chars t =
     match t with
@@ -161,10 +178,10 @@ let to_binary t =
 
 let rec of_stream =
     parser [< 'i ; stream >] ->
-        match i with
-            | n when n = magic_version ->
-                (parser [< t = term >] -> t) stream
-            | _ -> failwith "magic version not recognize"
+            match i with
+                | n when n = magic_version ->
+                    (parser [< t = term >] -> t) stream
+                | _ -> failwith "magic version not recognized"
 
 and term =
     parser [< 'magic; r = magic_parse magic >] -> r
@@ -176,15 +193,16 @@ and terms n l =
 
 and magic_parse tag =
     match tag with
-        | n when n = magic_small_int    -> parse_small_int
-        | n when n = magic_large_int    -> parse_large_int
-        | n when n = magic_float        -> parse_float
-        | n when n = magic_atom_or_bool -> parse_atom_or_bool
-        | n when n = magic_small_tuple  -> parse_small_tuple
-        | n when n = magic_large_tuple  -> parse_large_tuple
+        | n when n = magic_small_int     -> parse_small_int
+        | n when n = magic_large_int     -> parse_large_int
+        | n when n = magic_float         -> parse_float
+        | n when n = magic_atom_or_bool  -> parse_atom_or_bool
+        | n when n = magic_small_tuple   -> parse_small_tuple
+        | n when n = magic_large_tuple   -> parse_large_tuple
         (* TODO reference *)
+        | n when n = magic_new_reference -> parse_new_reference
         (* TODO port *)
-        (* TODO pid *)
+        | n when n = magic_pid      -> parse_pid
         | n when n = magic_nil     -> parse_nil
         | n when n = magic_string  -> parse_string
         | n when n = magic_list    -> parse_list
@@ -194,7 +212,10 @@ and magic_parse tag =
         (* TODO cached atom *)
         (* TODO new reference *)
         (* TODO fun *)
-        | _ -> failwith "magic tag not recognized"
+        | n -> failwith (Printf.sprintf 
+            "Eterm.of_stream: term magic tag not recognized: %c"
+            n
+        )
 
 and parse_small_int =
     parser [< i = eint 1 >] ->
@@ -237,8 +258,54 @@ and parse_list =
             | ET_list [] -> ET_list head
             | _ -> ET_improper_list (head, tail)
 
+and parse_pid =
+    parser [<
+        t = term; (* TODO specify atom? *)
+        idBytes = Tools.nnext 4 [];
+        serial = eint 4;
+        creationBytes = Tools.nnext 1 []
+    >] ->
+        match t with
+            | ET_atom node ->
+                let id = Tools.int_x_of_chars 28 idBytes in
+                let creation = Tools.int_x_of_chars 2 creationBytes in
+                ET_pid (node, id, serial, creation)
+            | _ ->
+                failwith "Eterm.of_stream: bad pid construct"
+
+and parse_new_reference =
+    parser [<
+        idLen = eint 2;
+        t = term; (* TODO specify atom? *)
+        creationBytes = Tools.nnext 1 [];
+        id0Bytes = Tools.nnext 4 [];
+        stream
+    >] ->
+        match t with
+            | ET_atom node ->
+                let creation = Tools.int_x_of_chars 2 creationBytes in
+                let id0 = Int32.of_int (Tools.int_x_of_chars 18 id0Bytes) in
+                let ids = parse_ids (idLen - 1) [id0] stream in
+                ET_ref (node, ids, creation)
+            | _ ->
+                failwith "Eterm.of_stream: bad new reference construct"
+
+and parse_ids n acc stream =
+    match n with
+        | 0 ->
+            List.rev acc
+        | n when n > 0 ->
+            begin
+            parser [< id = eint32 4; s >] -> (* TODO no 18 bits mask? *)
+                parse_ids (n-1) (id :: acc) s
+            end
+            stream
+
 and string_n n =
   parser [< s = Tools.nnext n [] >] -> Tools.implode s
 
 and eint n =
-  parser [< s = Tools.nnext n [] >] -> Tools.int_of_chars s 0
+  parser [< s = Tools.nnext n [] >] -> Tools.int_of_chars s
+
+and eint32 n =
+  parser [< s = Tools.nnext n [] >] -> Tools.int32_of_chars s
