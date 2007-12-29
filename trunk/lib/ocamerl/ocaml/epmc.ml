@@ -30,11 +30,11 @@ and tag_parse tag =
             failwith "message tag not recognized"
 
 and parse_alive2_rsp =
-    parser [< result = eint 1; creation = eint 2 >] ->
+    parser [<
+        result = Tools.eint_n 1;
+        creation = Tools.eint_n 2
+    >] ->
         Msg_alive2_rsp (result, creation)
-
-and eint n =
-  parser [< s = Tools.nnext n [] >] -> Tools.int_of_chars s
 
 
 let message_to_string msg = match msg with
@@ -59,21 +59,21 @@ let message_to_chars msg = match msg with
         extra
         ) ->
            tag
-        :: (Tools.chars_of_int (nodeServerPort) [] 2)
+        :: (Tools.chars_of_int (nodeServerPort) 2)
         @  nodeType
         :: char_of_int protocol
-        :: (Tools.chars_of_int (distrRangeMin) [] 2)
-        @  (Tools.chars_of_int (distrRangeMax) [] 2)
-        @  (Tools.chars_of_int (String.length nodeName) [] 2)
+        :: (Tools.chars_of_int (distrRangeMin) 2)
+        @  (Tools.chars_of_int (distrRangeMax) 2)
+        @  (Tools.chars_of_int (String.length nodeName) 2)
         @  (Tools.explode nodeName)
-        @  (Tools.chars_of_int (String.length extra) [] 2)
+        @  (Tools.chars_of_int (String.length extra) 2)
         @  (Tools.explode extra)
     | _ -> failwith "message_to_chars not implemented for this message"
 
 let pack_msg msg =
     let chars = message_to_chars msg in
     let len = List.length chars in
-    let head = Tools.chars_of_int (len) [] 2 in
+    let head = Tools.chars_of_int (len) 2 in
     let bin = Tools.implode (head @ chars) in
     bin
 

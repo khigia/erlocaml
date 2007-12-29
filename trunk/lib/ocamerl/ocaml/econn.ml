@@ -1,3 +1,220 @@
+module Handshake = struct
+
+    (* Constants *)
+
+    let tag_status           = 's'
+    let tag_recv_name        = 'n'
+    let tag_challenge_rsp    = 'r'
+    let tag_challenge_digest = 'a'
+
+
+    (* Challenge *)
+
+    let _create_challenge () =
+        Tools.int32_of_chars [
+            char_of_int (Random.int 0xFF);
+            char_of_int (Random.int 0xFF);
+            char_of_int (Random.int 0xFF);
+            char_of_int (Random.int 0xFF);
+        ]
+
+    let _compute_digest challenge cookie =
+        (* do not use Int32.to_string as it assume signed int32 *)
+        let challengeRepr = Printf.sprintf "%lu" challenge in
+        Digest.string (cookie ^ challengeRepr)
+
+    let _check_digest peerDigest cookie challenge =
+        match challenge with
+            | Some value ->
+                let expected = _compute_digest value cookie in
+                (*Trace.debug (lazy (Trace.printf
+                    "Check digest\nExpected: %s\nReceived: %s\n"
+                    (Digest.to_hex expected)
+                    (Digest.to_hex peerDigest)
+                ));*)
+                expected = peerDigest
+            | None ->
+                false
+
+
+    (* Messages *)
+
+    type message =
+        | Msg_recv_name of
+              int     (* distr version *)
+            * Int32.t (* peer flags *)
+            * string  (* peer name *)
+        | Msg_status of
+            string
+        | Msg_challenge_req of
+              int       (* distr version *)
+            * Int32.t   (* node flags *)
+            * Int32.t   (* challenge *)
+            * string    (* node name *)
+        | Msg_challenge_rsp of
+              Int32.t   (* peer challenge *)
+            * string    (* peer digest *)
+        | Msg_challenge_digest of
+              string  (* digest *)
+
+    let message_to_string msg = match msg with
+        | Msg_recv_name (distr, flags, name) ->
+            Printf.sprintf
+                "Msg_recv_name(%i, %lu, %s)"
+                distr
+                flags
+                name
+        | Msg_challenge_rsp (challenge, digest) ->
+            Printf.sprintf
+                "Msg_challenge_rsp(%lu, 0x%s)"
+                challenge
+                (Digest.to_hex digest)
+        | Msg_challenge_digest data ->
+            Printf.sprintf
+                "Msg_challenge_digest(%s)"
+                (Digest.to_hex data)
+
+    let rec message_of_stream =
+        parser [<
+            len = Tools.eint_n 2;
+            'tag;
+            msg = _parse (len - 1) tag
+        >] ->
+            msg
+
+    and _parse len tag =
+        match tag with
+            | n when n = tag_recv_name -> _parse_recv_name len
+            | n when n = tag_challenge_rsp -> _parse_challenge_rsp len
+            | _ ->
+                failwith "handshake message tag not recognized"
+
+    and _parse_recv_name len =
+        parser [<
+            peerDistrVsn = Tools.eint_n 2;
+            peerFlags = Tools.eint32_n 4;
+            peerName = Tools.string_n (len - 6)
+        >] ->
+            Msg_recv_name (
+                peerDistrVsn,
+                peerFlags,
+                peerName
+            )
+
+    and _parse_challenge_rsp len =
+        parser [<
+            challenge = Tools.eint32_n 4;
+            digest = Tools.string_n (len - 4)
+        >] ->
+            Msg_challenge_rsp (
+                challenge,
+                digest
+            )
+
+    let _message_to_chars msg = match msg with
+        | Msg_status status ->
+            tag_status 
+            :: (Tools.explode status)
+        | Msg_challenge_req (
+                distrVersion,
+                flags,
+                challenge,
+                nodeName
+            ) ->
+            tag_recv_name 
+            :: (Tools.chars_of_int distrVersion 2)
+            @  (Tools.chars_of_int32 flags 4)
+            @  (Tools.chars_of_int32 challenge 4)
+            @  (Tools.explode nodeName)
+        | Msg_challenge_digest digest ->
+            tag_challenge_digest
+            :: (Tools.explode digest)
+
+    let pack msg =
+        let chars = _message_to_chars msg in
+        let len = List.length chars in
+        let head = Tools.chars_of_int len 2 in
+        let r = Tools.implode (head @ chars) in
+        Trace.debug (lazy (Trace.printf
+            "Packed handshake msg: %s\n"
+            (Tools.dump_hex r "<<" ">>" " ")
+        ));
+        r
+
+
+    (* FSM *)
+
+    type fsmState = {
+        version:   int;
+        name:      string;
+        cookie:    string;
+        flags:     Int32.t;
+        challenge: Int32.t option;
+    }
+
+    let _st_recv_challenge_rsp st msg = match msg with
+        | Msg_challenge_rsp (peerChallenge, digest) ->
+            match _check_digest digest st.cookie st.challenge with
+                | true ->
+                    Trace.debug (lazy (Trace.printf
+                        "Peer digest OK\n"
+                    ));
+                    (* reply to peer challenge *)
+                    let reply = Msg_challenge_digest
+                        (_compute_digest peerChallenge st.cookie)
+                    in
+                    (* handshake OK! *)
+                    (
+                        st,
+                        None, (* end of FSM *)
+                        Some true, (* handshake finished and ok *)
+                        [reply;]
+                    )
+                | false ->
+                    Trace.debug (lazy (Trace.printf
+                        "Handshake failed: peer digest NOT ok\n"
+                    ));
+                    (* handshake failing here! *)
+                    (st, None, Some false, [])
+        | _ ->
+            Trace.debug (lazy (Trace.printf
+                "Handshake failed: got wrong message: %s\n"
+                (message_to_string msg)
+            ));
+            (* handshake failing here! *)
+            (st, None, Some false, [])
+
+    let _st_recv_name st msg =
+        (*TODO get info from msg: peerName ... *)
+        let challenge = _create_challenge () in
+        let msgStatus = Msg_status "ok" in
+        let msgChallengeReq = Msg_challenge_req (
+            st.version,
+            st.flags,
+            challenge,
+            st.name
+        ) in
+        (
+            {st with challenge = Some challenge;},
+            (Fsm.mkstate _st_recv_challenge_rsp),
+            None,
+            [msgStatus; msgChallengeReq;]
+        )
+
+    let create_fsm version name cookie flags =
+        Fsm.create
+            {
+                version   = version;
+                name      = name;
+                cookie    = cookie;
+                flags     = flags;
+                challenge = None;
+            }
+            (Fsm.mkstate _st_recv_name)
+
+end (* module Handshake *)
+
+
 type t = {
     addr: Unix.inet_addr;
     port: int;
@@ -11,23 +228,6 @@ type state = {
     tickTime: float;
 }
 
-(* TODO challenge type is Int32.t *)
-type msg_handshake =
-    | Msg_handshake_recv_name of
-          int     (* distr version *)
-        * Int32.t (* peer flags *)
-        * string  (* peer name *)
-    | Msg_handshake_status_ok
-    | Msg_handshake_challenge_req of
-          int       (* distr version *)
-        * Int32.t   (* node flags *)
-        * char list (* challenge: 4 bytes *)
-        * string    (* node name *)
-    | Msg_handshake_challenge_reply of
-          char list (* peer challenge: 4 bytes *)
-        * string    (* peer digest *)
-    | Msg_handshake_challenge_rsp of
-          string  (* digest *)
 
 type msg_control =
     | Msg_control_tick
@@ -40,49 +240,8 @@ type msg_control =
 
 
 let distr_version = 5
-let handshake_recv_name = 'n'
-let handshake_challenge_reply = 'r'
 
 
-let generate_challenge () =
-    [
-        char_of_int (Random.int 0xFF);
-        char_of_int (Random.int 0xFF);
-        char_of_int (Random.int 0xFF);
-        char_of_int (Random.int 0xFF);
-    ]
-
-
-let respond_challenge challenge cookie =
-    let challengeValue = Tools.int32_of_chars challenge in
-    let challengeRepr = Printf.sprintf "%lu" challengeValue in
-    Digest.string (cookie ^ challengeRepr)
-
-let check_digest peerDigest cookie challenge =
-    let expected = respond_challenge challenge cookie in
-    match String.compare expected peerDigest with
-        | 0 -> true
-        | _ -> false
-
-let handshake_message_to_string msg = match msg with
-    | Msg_handshake_recv_name (distr, flags, name) ->
-        Printf.sprintf
-            "Msg_handshake_recv_name(%i, %s, %s)"
-            distr
-            (Int32.to_string flags)
-            name
-    | Msg_handshake_challenge_reply ([c0;c1;c2;c3], digest) ->
-        Printf.sprintf
-            "Msg_handshake_challenge_reply(0x%.2X%.2X%.2X%.2X, 0x%s)"
-            (int_of_char c0)
-            (int_of_char c1)
-            (int_of_char c2)
-            (int_of_char c3)
-            (Digest.to_hex digest)
-    | Msg_handshake_challenge_rsp data ->
-        Printf.sprintf
-            "Msg_handshake_challenge_rsp(%s)"
-            (Digest.to_hex data)
 
 let control_message_to_string msg = match msg with
     | Msg_control_tick ->
@@ -104,7 +263,7 @@ let control_message_to_string msg = match msg with
 
 let rec control_message_of_stream =
     parser
-        | [< len = eint 4; stream >] ->
+        | [< len = Tools.eint_n 4; stream >] ->
             Trace.printf "main parse %i\n" len;
             Trace.flush ();
             let p = match len with
@@ -131,7 +290,7 @@ and tag_parse len tag =
 and parse_any tag len =
     Trace.printf "parse_any %i %c\n" len tag;
     Trace.flush ();
-    parser [< data = string_n len >] ->
+    parser [< data = Tools.string_n len >] ->
         Msg_control_any (tag, data)
 
 and parse_p len =
@@ -149,82 +308,6 @@ and parse_p_arg ctrl =
         | [< s >] ->
             Msg_control_p (ctrl, None)
 
-and string_n n =
-  parser [< s = Tools.nnext n [] >] -> Tools.implode s
-
-and eint n =
-  parser [< s = Tools.nnext n [] >] -> Tools.int_of_chars s
-
-
-let rec handshake_message_of_stream =
-    parser [< len = eint 2; 'tag; msg = tag_parse (len - 1) tag >] ->
-            msg
-
-and tag_parse len tag =
-    match tag with
-        | n when n = handshake_recv_name -> parse_handshake_recv_name len
-        | n when n = handshake_challenge_reply -> parse_handshake_challenge_reply len
-        | _ ->
-            failwith "handshake message tag not recognized"
-
-and parse_handshake_recv_name len =
-    parser [<
-        peerDistrVsn = eint 2;
-        peerFlags = eint32 4;
-        peerName = string_n (len - 6)
-    >] ->
-        Msg_handshake_recv_name (
-            peerDistrVsn,
-            peerFlags,
-            peerName
-        )
-
-and parse_handshake_challenge_reply len =
-    parser [<
-        peerChallenge = Tools.nnext 4 [];
-        peerDigest = string_n (len - 4)
-    >] ->
-        Msg_handshake_challenge_reply (
-            peerChallenge,
-            peerDigest
-        )
-
-and string_n n =
-  parser [< s = Tools.nnext n [] >] -> Tools.implode s
-
-and eint n =
-  parser [< s = Tools.nnext n [] >] -> Tools.int_of_chars s
-
-and eint32 n =
-  parser [< s = Tools.nnext n [] >] -> Tools.int32_of_chars s
-
-let handshake_message_to_chars msg = match msg with
-    | Msg_handshake_status_ok ->
-        Tools.explode "sok"
-    | Msg_handshake_challenge_req (
-            distr_version,
-            flags,
-            challenge,
-            nodeName
-        ) ->
-        handshake_recv_name 
-        :: (Tools.chars_of_int distr_version [] 2)
-        @  (Tools.chars_of_int32 flags [] 4)
-        @  challenge
-        @  (Tools.explode nodeName)
-    | Msg_handshake_challenge_rsp digest ->
-        'a'
-        :: (Tools.explode digest)
-
-
-let pack_handshake_msg msg =
-    let chars = handshake_message_to_chars msg in
-    let len = List.length chars in
-    let head = Tools.chars_of_int len [] 2 in
-    let r = Tools.implode (head @ chars) in
-    Trace.printf "Packed handshake msg: %s\n"
-        (Tools.dump_hex r "<<" ">>" " ");
-    r
 
 let control_message_to_chars msg = match msg with
     | Msg_control_tick ->
@@ -233,88 +316,53 @@ let control_message_to_chars msg = match msg with
 let pack_control_msg msg =
     let chars = control_message_to_chars msg in
     let len = List.length chars in
-    let head = Tools.chars_of_int len [] 4 in
+    let head = Tools.chars_of_int len 4 in
     let r = Tools.implode (head @ chars) in
     Trace.printf "Packed control msg: %s\n"
         (Tools.dump_hex r "<<" ">>" " ");
     r
 
-let _handshake_recv_name state is oc =
-    let msg = try
-        handshake_message_of_stream is
-    with
-        Stream.Failure ->
-            Stream.dump print_char is;
-            failwith "got stream failure"
-    in
-    Trace.printf
-        "Receive handshake message: %s\n"
-        (handshake_message_to_string msg)
+
+let _handshake_actions oc actions =
+    List.iter
+        (fun msg ->
+            let bin = Handshake.pack msg in
+            output_string oc bin
+        )
+        actions
     ;
-    (* TODO only if node has no ongoing connection! *)
-    output_string
-        oc
-        (pack_handshake_msg Msg_handshake_status_ok);
-    let challenge = generate_challenge () in
-    output_string
-        oc
-        (pack_handshake_msg (Msg_handshake_challenge_req (
-            distr_version,
-            state.flags,
-            challenge,
-            state.nodeName
-        )));
-    flush oc;
-    challenge
+    flush oc
 
-let _handshake_recv_challenge_reply state is oc challenge =
+let rec _handshake_loop fsm istream oc =
     let msg = try
-        handshake_message_of_stream is
+        Handshake.message_of_stream istream
     with
-        Stream.Failure ->
-            Stream.dump print_char is;
-            failwith "got stream failure"
+    Stream.Failure ->
+            failwith "Handshake stream failure"
     in
-    Trace.printf
-        "Receive handshake message: %s\n"
-        (handshake_message_to_string msg);
-    match msg with
-        | Msg_handshake_challenge_reply (
-            peerChallenge,
-            peerDigest
-        ) ->
-        match check_digest peerDigest state.cookie challenge with
-            | true ->
-                Trace.debug (lazy (Trace.printf
-                    "Peer digest OK (cookie=%s); sending node digest\n"
-                    state.cookie
-                ));
-                Trace.flush ();
-                let rsp = Msg_handshake_challenge_rsp
-                    (respond_challenge
-                        peerChallenge
-                        state.cookie
-                    )
-                in
-                Trace.debug (lazy (Trace.printf
-                    "Computed digest respond: %s\n"
-                    (handshake_message_to_string rsp)
-                ));
-                output_string oc (pack_handshake_msg rsp);
-                flush oc;
-                Trace.debug (lazy (Trace.printf
-                    "Node digest sent back\n"
-                ));
-                Trace.flush ();
-                true
-            | false ->
-                print_endline "handshake digest NOT ok";
-                false
-    
+    Trace.debug (lazy (Trace.printf
+        "Received handshake message: %s\n"
+        (Handshake.message_to_string msg)
+    ));
+    match Fsm.send fsm msg with
+        | (Some result, actions) ->
+            _handshake_actions oc actions;
+            Trace.flush ();
+            result
+        | (None, actions) ->
+            _handshake_actions oc actions;
+            Trace.flush ();
+            _handshake_loop fsm istream oc
 
-let _handshake state istream oc =
-    let challenge = _handshake_recv_name state istream oc in
-    _handshake_recv_challenge_reply state istream oc challenge
+let _handshake st istream oc =
+    let fsm = Handshake.create_fsm
+        distr_version (*TODO value come from where? ... *)
+        st.nodeName
+        st.cookie
+        st.flags
+    in
+    _handshake_loop fsm istream oc
+
 
 let rec _ticker time oc =
     Thread.delay time;
@@ -371,7 +419,7 @@ let _handler state id fd =
                 ()
             in
             _control state istream oc;
-            Thread.kill ticker;
+            Thread.kill ticker; (* not implemented ... use a mutex on stop variable: the ticker check this variable and continue only if this variable is true; current thread can then set it to false whenever ... advantage is that it can be used for multiple thread in this connection *)
             Trace.debug (lazy (Trace.printf
                 "End of connection\n"
             ));

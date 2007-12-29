@@ -42,7 +42,7 @@ module ETuple =
                         fold_left (fun acc e -> acc @ (f e)) [] tuple
                     ))
                 | false ->
-                    magic_large_tuple :: ( (Tools.chars_of_int (Array.length tuple) [] 4) @ (
+                    magic_large_tuple :: ( (Tools.chars_of_int (Array.length tuple) 4) @ (
                         fold_left (fun acc e -> acc @ (f e)) [] tuple
                     ))
     end
@@ -70,7 +70,7 @@ module ETupler = functor(ET: sig
                         fold_left (fun acc e -> acc @ (ET.to_chars e)) [] tuple
                     ))
                 | false ->
-                    magic_large_tuple :: ( (Tools.chars_of_int (Array.length tuple) [] 4) @ (
+                    magic_large_tuple :: ( (Tools.chars_of_int (Array.length tuple) 4) @ (
                         fold_left (fun acc e -> acc @ (ET.to_chars e)) [] tuple
                     ))
     end
@@ -146,14 +146,14 @@ let rec to_chars t =
         | ET_int n when n < 256l ->
             magic_small_int :: [char_of_int (Int32.to_int n)]
         | ET_int n ->
-            magic_large_int :: (Tools.chars_of_int (Int32.to_int n) [] 4)
+            magic_large_int :: (Tools.chars_of_int32 n 4)
         | ET_float f ->
             let s = Printf.sprintf "%.20e" f in
             let pad = String.make (31 - (String.length s)) '\000' in
             magic_float :: (Tools.explode s) @ (Tools.explode pad)
         | ET_atom a  ->
             magic_atom_or_bool
-            :: (Tools.chars_of_int (String.length a) [] 2)
+            :: (Tools.chars_of_int (String.length a) 2)
             @ (Tools.explode a)
         | ET_bool b ->
             to_chars (ET_atom (string_of_bool b))
@@ -161,15 +161,15 @@ let rec to_chars t =
             ETuple.to_chars to_chars l
         | ET_string s ->
             magic_string
-            :: (Tools.chars_of_int (String.length s) [] 2)
+            :: (Tools.chars_of_int (String.length s) 2)
             @ (Tools.explode s)
         | ET_list l ->
             magic_list
-            :: (Tools.chars_of_int (List.length l) [] 4)
+            :: (Tools.chars_of_int (List.length l) 4)
             @ (List.fold_left (fun acc e -> to_chars e) [] l)
         | ET_improper_list (l, tail) ->
             magic_list
-            :: (Tools.chars_of_int (List.length l) [] 4)
+            :: (Tools.chars_of_int (List.length l) 4)
             @ (List.fold_left (fun acc e -> to_chars e) [] l)
             @ (to_chars tail)
 
@@ -218,34 +218,34 @@ and magic_parse tag =
         )
 
 and parse_small_int =
-    parser [< i = eint 1 >] ->
-        ET_int (Int32.of_int i)
+    parser [< i = Tools.eint32_n 1 >] ->
+        ET_int i
 
 and parse_large_int =
-    parser [< n = eint 4 >] ->
-        ET_int (Int32.of_int n)
+    parser [< n = Tools.eint32_n 4 >] ->
+        ET_int n
 
 and parse_float =
-    parser [< s = string_n 31 >] ->
+    parser [< s = Tools.string_n 31 >] ->
         ET_float (Tools.float_of_padded_string s)
 
 and parse_atom_or_bool =
-    parser [< n = eint 2; atom = string_n n >] ->
+    parser [< n = Tools.eint_n 2; atom = Tools.string_n n >] ->
         match atom with
             | "true"  -> ET_bool true
             | "false" -> ET_bool false
             | str     -> ET_atom str 
 
 and parse_small_tuple =
-    parser [< n = eint 1; a = terms n [] >] ->
+    parser [< n = Tools.eint_n 1; a = terms n [] >] ->
         ET_tuple (ETuple.make a)
 
 and parse_large_tuple =
-    parser [< n = eint 4; a = terms n [] >] ->
+    parser [< n = Tools.eint_n 4; a = terms n [] >] ->
         ET_tuple (ETuple.make a)
 
 and parse_string =
-    parser [< n = eint 2; data = string_n n >] ->
+    parser [< n = Tools.eint_n 2; data = Tools.string_n n >] ->
         ET_string data
 
 and parse_nil =
@@ -253,7 +253,7 @@ and parse_nil =
         ET_list []
 
 and parse_list =
-    parser [< n = eint 4; head = terms n []; tail = term >] ->
+    parser [< n = Tools.eint_n 4; head = terms n []; tail = term >] ->
         match tail with
             | ET_list [] -> ET_list head
             | _ -> ET_improper_list (head, tail)
@@ -261,9 +261,9 @@ and parse_list =
 and parse_pid =
     parser [<
         t = term; (* TODO specify atom? *)
-        idBytes = Tools.nnext 4 [];
-        serial = eint 4;
-        creationBytes = Tools.nnext 1 []
+        idBytes = Tools.next_n 4;
+        serial = Tools.eint_n 4;
+        creationBytes = Tools.next_n 1
     >] ->
         match t with
             | ET_atom node ->
@@ -275,10 +275,10 @@ and parse_pid =
 
 and parse_new_reference =
     parser [<
-        idLen = eint 2;
+        idLen = Tools.eint_n 2;
         t = term; (* TODO specify atom? *)
-        creationBytes = Tools.nnext 1 [];
-        id0Bytes = Tools.nnext 4 [];
+        creationBytes = Tools.next_n 1;
+        id0Bytes = Tools.next_n 4;
         stream
     >] ->
         match t with
@@ -296,16 +296,7 @@ and parse_ids n acc stream =
             List.rev acc
         | n when n > 0 ->
             begin
-            parser [< id = eint32 4; s >] -> (* TODO no 18 bits mask? *)
+            parser [< id = Tools.eint32_n 4; s >] -> (* TODO no 18 bits mask? *)
                 parse_ids (n-1) (id :: acc) s
             end
             stream
-
-and string_n n =
-  parser [< s = Tools.nnext n [] >] -> Tools.implode s
-
-and eint n =
-  parser [< s = Tools.nnext n [] >] -> Tools.int_of_chars s
-
-and eint32 n =
-  parser [< s = Tools.nnext n [] >] -> Tools.int32_of_chars s
