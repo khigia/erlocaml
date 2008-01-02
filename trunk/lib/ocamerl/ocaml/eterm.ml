@@ -172,6 +172,23 @@ let rec to_chars t =
             :: (Tools.chars_of_int (List.length l) 4)
             @ (List.fold_left (fun acc e -> to_chars e) [] l)
             @ (to_chars tail)
+        | ET_pid (node, id, serial, creation) ->
+            magic_pid
+            :: (to_chars (ET_atom node))
+            @  (Tools.chars_of_int id 4)
+            @  (Tools.chars_of_int serial 4)
+            @  (Tools.chars_of_int creation 1)
+        | ET_ref (node, ids, creation) ->
+            magic_new_reference
+            :: (Tools.chars_of_int (List.length ids) 2)
+            @  (to_chars (ET_atom node))
+            @  (Tools.chars_of_int creation 1)
+            @  (List.fold_left
+                (fun acc e -> (acc @ Tools.chars_of_int32 e 4))
+                []
+                ids
+            )
+
 
 let to_binary t =
     EBinary.make (magic_version :: (to_chars t))
@@ -210,7 +227,6 @@ and magic_parse tag =
         (* TODO large big *)
         (* TODO new cache *)
         (* TODO cached atom *)
-        (* TODO new reference *)
         (* TODO fun *)
         | n -> failwith (Printf.sprintf 
             "Eterm.of_stream: term magic tag not recognized: %c"

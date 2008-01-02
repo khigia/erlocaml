@@ -86,12 +86,35 @@ let trace indent node =
         _trace_pids indent node.pids
     ))
 
+let _control_message (ictrl, iarg) =
+    (* TODO this is crapy fun meant to respond only to ping *)
+    let ctrl = match ictrl with Eterm.ET_tuple c -> c in
+    let arg = match iarg with Some (Eterm.ET_tuple c) -> c in
+    match ctrl.(0) with
+        | Eterm.ET_int 6l (*TODO cste*) ->
+            match ctrl.(3) with
+                | Eterm.ET_atom "net_kernel" ->
+                    match arg.(0) with
+                        | Eterm.ET_atom "$gen_call" ->
+                            let arg1 = match arg.(1) with Eterm.ET_tuple c -> c in
+                            let arg2 = match arg.(2) with Eterm.ET_tuple c -> c in
+                            match arg2.(0) with
+                                | Eterm.ET_atom "is_auth" ->
+                                    let toPid = arg1.(0) in
+                                    let ref = arg1.(1) in
+                                    let rsp = Eterm.ET_tuple (Eterm.ETuple.make [ref; Eterm.ET_atom "yes"]) in
+                                    let cookie = Eterm.ET_atom "" in
+                                    [(
+                                        Eterm.ET_tuple (Eterm.ETuple.make [Eterm.ET_int 2l; cookie; toPid;]),
+                                        Some rsp;
+                                    );]
+
 let make nodeName =
     Trace.info (lazy (Trace.printf 
         "Making node '%s'\n" 
         nodeName
     ));
-    let server = Econn.create nodeName in
+    let server = Econn.create nodeName _control_message in
     let epmc = Epmc.make nodeName server.Econn.port in
     let pids = _create_pid_manager 0 0 None in
     {
