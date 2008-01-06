@@ -6,6 +6,7 @@ try
     let n = Enode.make "ocaml@devhost" in
     let _ = Enode.trace "    " n in
 
+(*
     let _ = Trace.info (lazy (Trace.printf
         "Publishing node\n"
     )) in
@@ -15,6 +16,7 @@ try
         (Enode.is_published n)
     )) in
     let _ = Enode.trace "    " n in
+*)
 
     (* TODO move to unit test
     let _ = Trace.info (lazy (Trace.printf
@@ -36,7 +38,9 @@ try
 
     let _ = Trace.flush () in
 
-    Thread.join n.Enode.server.Econn.thread
+    match n.Enode.server.Econn.thread with
+        | Some thr -> Thread.join thr
+        | _ -> ()
     (*
     let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in
     (*

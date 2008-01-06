@@ -1,20 +1,41 @@
+module Mbox = struct
+    
+    type t = {
+        pid: Eterm.e_pid;
+        mutable recvCB: (Eterm.eterm -> unit) option; (* TODO no callback (it take thread of connection; probably each mbox has its own thread and message are store in fifo *)
+    }
+
+    let create pid = {
+        pid = pid;
+        recvCB = None;
+    }
+
+    let set_recv_cb mbox recvCB =
+        mbox.recvCB <- recvCB
+
+    let push_message mbox msg =
+        (* TODO put message in some queue ...*)
+        match mbox.recvCB with
+            | Some cb -> cb msg
+            | None -> () (* TODO arg! drop msg silently *)
+
+end (* module Mbox *)
+
+
 type node = {
     name: string;
     mutable epmc: Epmc.t;
     server: Econn.t;
     pids: pids;     (* PID management *)
+    name_to_mbox: (string, Mbox.t) Hashtbl.t;
+    connections: (string, Econn.Connection.t) Hashtbl.t;
 }
-
 and pids = {
     mutable creation: int option;
     mutable pid_count: int;
     mutable serial: int;
-    pid_to_mbox: (Eterm.e_pid, mbox) Hashtbl.t;
-    mbox_to_pid: (mbox, Eterm.e_pid) Hashtbl.t;
-}
-
-and mbox = {
-    pid: Eterm.e_pid;
+    pid_to_mbox: (Eterm.e_pid, Mbox.t) Hashtbl.t;
+    mbox_to_pid: (Mbox.t, Eterm.e_pid) Hashtbl.t;
 }
 
 
@@ -48,10 +69,7 @@ let _create_pid pids nodeName =
             pid
 
 let _create_mbox pids pid =
-    let mbox =
-    {
-        pid = pid;
-    } in
+    let mbox = Mbox.create pid in
     Hashtbl.add pids.pid_to_mbox pid mbox;
     Hashtbl.add pids.mbox_to_pid mbox pid;
     mbox
@@ -86,43 +104,61 @@ let trace indent node =
         _trace_pids indent node.pids
     ))
 
-let _control_message (ictrl, iarg) =
-    (* TODO this is crapy fun meant to respond only to ping *)
-    let ctrl = match ictrl with Eterm.ET_tuple c -> c in
-    let arg = match iarg with Some (Eterm.ET_tuple c) -> c in
-    match ctrl.(0) with
-        | Eterm.ET_int 6l (*TODO cste*) ->
-            match ctrl.(3) with
-                | Eterm.ET_atom "net_kernel" ->
-                    match arg.(0) with
-                        | Eterm.ET_atom "$gen_call" ->
-                            let arg1 = match arg.(1) with Eterm.ET_tuple c -> c in
-                            let arg2 = match arg.(2) with Eterm.ET_tuple c -> c in
-                            match arg2.(0) with
-                                | Eterm.ET_atom "is_auth" ->
-                                    let toPid = arg1.(0) in
-                                    let ref = arg1.(1) in
-                                    let rsp = Eterm.ET_tuple (Eterm.ETuple.make [ref; Eterm.ET_atom "yes"]) in
-                                    let cookie = Eterm.ET_atom "" in
-                                    [(
-                                        Eterm.ET_tuple (Eterm.ETuple.make [Eterm.ET_int 2l; cookie; toPid;]),
-                                        Some rsp;
-                                    );]
+let create_mbox node =
+    let pid = _create_pid node.pids node.name in
+    let mbox = _create_mbox node.pids pid in
+    mbox
 
-let make nodeName =
-    Trace.info (lazy (Trace.printf 
-        "Making node '%s'\n" 
-        nodeName
-    ));
-    let server = Econn.create nodeName _control_message in
-    let epmc = Epmc.make nodeName server.Econn.port in
-    let pids = _create_pid_manager 0 0 None in
-    {
-        name = nodeName;
-        epmc = epmc;
-        server = server;
-        pids = pids;
-    }
+let register_mbox node mbox name =
+    Hashtbl.add node.name_to_mbox name mbox
+
+let find_mbox node name =
+    (* may raise Not_found *)
+    Hashtbl.find node.name_to_mbox name
+
+let _connection_up node peerName conn =
+    Hashtbl.add node.connections peerName conn
+
+let _get_connection node peerName =
+    try
+        let conn = Hashtbl.find node.connections peerName in
+        Some conn
+    with
+        Not_found -> None
+
+let send node toPid msg =
+    let peerName = Eterm.pid_node_name toPid in
+    match _get_connection node peerName with
+        | Some conn ->
+            Econn.Connection.send conn toPid msg
+        | _ ->
+            (*TODO clear error management *)
+            failwith "Cannot send message to node"
+
+let _incoming_message node dest msg =
+    match dest with
+        | Eterm.ET_atom name ->
+            let mbox = find_mbox node name in
+            Mbox.push_message mbox msg
+
+let _create_net_kernel node =
+    let mbox = create_mbox node in
+    let recvCB iarg = (match iarg with
+        | Eterm.ET_tuple arg ->
+            match arg.(0) with
+                | Eterm.ET_atom "$gen_call" ->
+                    let arg1 = match arg.(1) with Eterm.ET_tuple c -> c in
+                    let arg2 = match arg.(2) with Eterm.ET_tuple c -> c in
+                    match arg2.(0) with
+                        | Eterm.ET_atom "is_auth" ->
+                            let toPid = arg1.(0) in
+                            let ref = arg1.(1) in
+                            let rsp = Eterm.ET_tuple (Eterm.ETuple.make [ref; Eterm.ET_atom "yes"]) in
+                            send node toPid rsp
+    ) in
+    let _ = Mbox.set_recv_cb mbox (Some recvCB) in
+    let _ = register_mbox node mbox "net_kernel" in
+    ()
 
 let is_published node =
     match node.pids.creation with
@@ -130,6 +166,7 @@ let is_published node =
         | Some _ -> true
 
 let publish node =
+    (* TODO check not already published! *)
     (* TODO should this function fail if publication fails? *)
     let result = Epmc.connect node.epmc in
     node.pids.creation <- result;
@@ -138,7 +175,27 @@ let publish node =
 let unpublish node =
     Epmc.disconnect node.epmc
     
-let create_mbox node =
-    let pid = _create_pid node.pids node.name in
-    let mbox = _create_mbox node.pids pid in
-    mbox
+let make nodeName =
+    Trace.info (lazy (Trace.printf 
+        "Making node '%s'\n" 
+        nodeName
+    ));
+    let server = Econn.create nodeName in
+    let epmc = Epmc.make nodeName server.Econn.port in
+    let pids = _create_pid_manager 0 0 None in
+    let node = {
+        name = nodeName;
+        epmc = epmc;
+        server = server;
+        pids = pids;
+        name_to_mbox = Hashtbl.create 10;
+        connections = Hashtbl.create 10;
+    } in
+    let _ = publish node in
+    let _ = _create_net_kernel node in
+    let _ = Econn.run
+        server
+        (_connection_up node)
+        (_incoming_message node)
+    in
+    node

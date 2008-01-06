@@ -104,6 +104,10 @@ and e_pid =
         * int  (* serial number *)
         * int  (* node creation ID *)
 
+let pid_node_name pid =
+    match pid with
+        | ET_pid (name, _, _, _) -> name
+
 let make_pid nodeName pid_num serial creation =
     (
         nodeName,
