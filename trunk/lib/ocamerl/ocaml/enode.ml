@@ -2,22 +2,20 @@ module Mbox = struct
     
     type t = {
         pid: Eterm.e_pid;
-        mutable recvCB: (Eterm.eterm -> unit) option; (* TODO no callback (it take thread of connection; probably each mbox has its own thread and message are store in fifo *)
+        queue: Eterm.eterm Fifo.t;
     }
 
     let create pid = {
         pid = pid;
-        recvCB = None;
+        queue = Fifo.create ();
     }
 
-    let set_recv_cb mbox recvCB =
-        mbox.recvCB <- recvCB
-
     let push_message mbox msg =
-        (* TODO put message in some queue ...*)
-        match mbox.recvCB with
-            | Some cb -> cb msg
-            | None -> () (* TODO arg! drop msg silently *)
+        (* TODO Fifo need to implement some maximum size?! *)
+        Fifo.put mbox.queue msg
+
+    let receive mbox =
+        Fifo.get mbox.queue
 
 end (* module Mbox *)
 
@@ -113,8 +111,12 @@ let register_mbox node mbox name =
     Hashtbl.add node.name_to_mbox name mbox
 
 let find_mbox node name =
-    (* may raise Not_found *)
-    Hashtbl.find node.name_to_mbox name
+    try
+        let rsp = Hashtbl.find node.name_to_mbox name in
+        Some rsp
+    with
+        Not_found ->
+            None
 
 let _connection_up node peerName conn =
     Hashtbl.add node.connections peerName conn
@@ -136,29 +138,45 @@ let send node toPid msg =
             failwith "Cannot send message to node"
 
 let _incoming_message node dest msg =
+    (* dispatch message to the appropriate mbox *)
     match dest with
         | Eterm.ET_atom name ->
-            let mbox = find_mbox node name in
-            Mbox.push_message mbox msg
+            match find_mbox node name with
+                | Some mbox ->
+                    Mbox.push_message mbox msg
+                | _ ->
+                    failwith 
+                        (Printf.sprintf
+                            "dest not found (%s)"
+                            name
+                        )
+        (* TODO probably other like pid ... or at least a clean fail*)
 
 let _create_net_kernel node =
     let mbox = create_mbox node in
-    let recvCB iarg = (match iarg with
-        | Eterm.ET_tuple arg ->
-            match arg.(0) with
-                | Eterm.ET_atom "$gen_call" ->
-                    let arg1 = match arg.(1) with Eterm.ET_tuple c -> c in
-                    let arg2 = match arg.(2) with Eterm.ET_tuple c -> c in
-                    match arg2.(0) with
-                        | Eterm.ET_atom "is_auth" ->
-                            let toPid = arg1.(0) in
-                            let ref = arg1.(1) in
-                            let rsp = Eterm.ET_tuple (Eterm.ETuple.make [ref; Eterm.ET_atom "yes"]) in
-                            send node toPid rsp
-    ) in
-    let _ = Mbox.set_recv_cb mbox (Some recvCB) in
     let _ = register_mbox node mbox "net_kernel" in
-    ()
+    let rec recv_loop = fun () ->
+        let msg = Mbox.receive mbox in
+        (match msg with
+            | Eterm.ET_tuple arg ->
+                (* TODO could we have a better interface to match tuple and all eterm? *)
+                (match arg.(0) with
+                    | Eterm.ET_atom "$gen_call" ->
+                        let arg1 = match arg.(1) with Eterm.ET_tuple c -> c in
+                        let arg2 = match arg.(2) with Eterm.ET_tuple c -> c in
+                        (match arg2.(0) with
+                            | Eterm.ET_atom "is_auth" ->
+                                let toPid = arg1.(0) in
+                                let ref = arg1.(1) in
+                                let rsp = Eterm.ET_tuple (Eterm.ETuple.make [ref; Eterm.ET_atom "yes"]) in
+                                send node toPid rsp
+                        )
+                )
+            (* TODO failing cases ... *)
+        );
+        recv_loop ()
+    in
+    Thread.create recv_loop ()
 
 let is_published node =
     match node.pids.creation with
@@ -175,27 +193,31 @@ let publish node =
 let unpublish node =
     Epmc.disconnect node.epmc
     
-let make nodeName =
+let create nodeName =
     Trace.info (lazy (Trace.printf 
         "Making node '%s'\n" 
         nodeName
     ));
     let server = Econn.create nodeName in
-    let epmc = Epmc.make nodeName server.Econn.port in
+    let epmc = Epmc.create nodeName server.Econn.port in
     let pids = _create_pid_manager 0 0 None in
-    let node = {
+    {
         name = nodeName;
         epmc = epmc;
         server = server;
         pids = pids;
         name_to_mbox = Hashtbl.create 10;
         connections = Hashtbl.create 10;
-    } in
+    }
+
+let start node =
     let _ = publish node in
     let _ = _create_net_kernel node in
-    let _ = Econn.run
-        server
+    Econn.start
+        node.server
         (_connection_up node)
         (_incoming_message node)
-    in
-    node
+
+let stop node =
+    (*TODO stop the server, connections, epmc, ... *)
+    ()

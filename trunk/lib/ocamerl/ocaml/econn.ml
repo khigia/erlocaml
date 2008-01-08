@@ -321,8 +321,10 @@ module Control = struct
         let len = List.length chars in
         let head = Tools.chars_of_int len 4 in
         let r = Tools.implode (head @ chars) in
+        (*
         Trace.printf "Packed control msg: %s\n"
             (Tools.dump_hex r "<<" ">>" " ");
+        *)
         r
 
 end (* module Control *)
@@ -332,9 +334,11 @@ module Ticker = struct
     
     type t = {
         tickTime: float;
-        tickCB: (unit -> unit) option;
+        mutable tickCB: (unit -> unit) option;
         actLock: Mutex.t;
         mutable lastActivity: time;
+        stopLock: Mutex.t;
+        mutable stop: bool;
     }
     and time = float
 
@@ -345,6 +349,8 @@ module Ticker = struct
         tickCB = None;
         actLock = Mutex.create ();
         lastActivity = now ();
+        stopLock = Mutex.create ();
+        stop = false;
     }
     
     let update_activity ticker =
@@ -356,27 +362,49 @@ module Ticker = struct
             ticker.lastActivity
 
     let set_cb ticker cb =
-        {ticker with tickCB = Some cb}
+        ticker.tickCB <- Some cb
 
-    let run ticker =
+    let is_stop ticker =
+        Mutex.lock ticker.stopLock;
+        let stop = ticker.stop in
+        Mutex.unlock ticker.stopLock;
+        stop
+
+    let start ticker checkFreq =
+        (* checkFreq enable to thread to wakes-up and check
+        that it should continue to run or not  ... crap!*)
         let rec _loop delay =
             Thread.delay delay;
-            let since = (now ()) -. ticker.lastActivity in
-            let delta = since -. ticker.tickTime in
-            match delta >= 0.0 with
-                | true ->
-                    Trace.printf "Ticker: %f is time to tick\n" (now ());
-                    let _ = match ticker.tickCB with
-                        | Some f -> f ()
-                        | None -> ()
-                    in
-                    update_activity ticker;
-                    Trace.flush ();
-                    _loop ticker.tickTime
+            match is_stop ticker with
+                | false ->
+                    let since = (now ()) -. ticker.lastActivity in
+                    let delta = since -. ticker.tickTime in
+                    ignore (match delta >= 0.0 with
+                        | true ->
+                            Trace.printf "Ticker: %f is time to tick\n" (now ());
+                            let _ = match ticker.tickCB with
+                                | Some f -> f ()
+                                | None -> ()
+                            in
+                            update_activity ticker;
+                            Trace.flush ();
+                            (*_loop ticker.tickTime *)
+                            _loop checkFreq
+                        | _ ->
+                            (*_loop delta*)
+                            _loop checkFreq
+                    )
                 | _ ->
-                    _loop delta
+                    Trace.printf "Ticker is stopping\n";
+                    Trace.flush ()
         in
-        Thread.create _loop ticker.tickTime
+        (*Thread.create _loop ticker.tickTime*)
+        Thread.create _loop checkFreq
+
+    let stop ticker =
+        Mutex.lock ticker.stopLock;
+        ticker.stop <- true;
+        Mutex.unlock ticker.stopLock
 
 end (* module Ticker *)
 
@@ -385,52 +413,77 @@ module Sender = struct
 
     type t = {
         ochannel: out_channel;
-        queue: string Fifo.t;
+        queue: msg Fifo.t;
+        mutable thread: Thread.t option;
         mutable ticker: Ticker.t option;
     }
+    and msg =
+          Data of string
+        | Ctrl of int
 
-    let tickData = Control.pack Control.Msg_tick
+    let tickData = Data (Control.pack Control.Msg_tick)
 
     let create oc =
         {
             ochannel = oc;
             queue = Fifo.create ();
+            thread = None;
             ticker = None;
         }
 
     let tick sender =
+        Trace.printf "Sender is ticking\n";
+        Trace.flush ();
         Fifo.put sender.queue tickData
 
     let send sender data =
-        let _ = Fifo.put sender.queue data in
+        let _ = Fifo.put sender.queue (Data data) in
         match sender.ticker with
             | Some ticker ->
                 Ticker.update_activity ticker
             | _ -> ()
 
-    let run sender =
+    let start sender =
         let rec _loop () =
-            let data = Fifo.get sender.queue in
-            output_string sender.ochannel data;
-            flush sender.ochannel;
-            _loop ()
+            let msg = Fifo.get sender.queue in
+            match msg with
+                | Data data ->
+                    Trace.printf "Sender sent one packet\n";
+                    Trace.flush ();
+                    output_string sender.ochannel data;
+                    flush sender.ochannel;
+                    _loop ()
+                | Ctrl code ->
+                    (* any control message stop the loop *)
+                    Trace.printf "Sender is stopping\n"
         in
-        Thread.create _loop ()
+        let thr = Thread.create _loop () in
+        sender.thread <- Some thr;
+        ()
 
-    let run_ticker sender tickTime =
+    let stop sender =
+        let _ = match sender.ticker with
+            | Some ticker ->
+                Ticker.stop ticker
+            | None ->
+                ()
+        in
+        match sender.thread with
+            | Some thr ->
+                Fifo.put sender.queue (Ctrl 0);
+                Thread.join thr
+            | None ->
+                ()
+
+
+    let start_ticker sender tickTime =
         let ticker = Ticker.create tickTime in
         let tickCB = fun () -> tick sender in
         let _ = Ticker.set_cb ticker tickCB in
         sender.ticker <- Some ticker;
-        Ticker.run ticker
+        Ticker.start ticker 1.0
 
 end (* module Sender *)
-
-
-(* TODO
-    - module Server (node server)
-    - module Client (node client)
-*)
 
 
 module Connection = struct
@@ -449,9 +502,13 @@ module Connection = struct
             Eterm.ET_atom ""; (* cookie ... *)
             toPid;
         ]) in
-        let bin = Control.pack (Control.Msg_p (dest, Some msg)) in
+        let msg = Control.Msg_p (dest, Some msg) in
+        Trace.printf
+            "Sending control message: %s\n"
+            (Control.message_to_string msg);
+        Trace.flush ();
+        let bin = Control.pack msg in
         Sender.send conn.sender bin
-
 
 end (* module Connection *)
 
@@ -545,7 +602,13 @@ let rec _control state istream sender =
                 | Eterm.ET_int 6l (*TODO cste*) ->
                     let dest = c.(3) in
                     let a = match arg with Some c -> c in
-                    state.incomingMessageCB dest a
+                    try
+                        state.incomingMessageCB dest a
+                    with
+                        exn ->
+                            Trace.printf
+                                "Incoming message not handled: %s\n"
+                                (Printexc.to_string exn)
                 (*TODO lot of cases to handle *)
             )
         | Control.Msg_any (tag, data) ->
@@ -564,7 +627,7 @@ let _handler state id fd =
     let istream = Stream.of_channel ic in
     (* sender is responsible of output connection *)
     let sender = Sender.create oc in
-    let senderThread = Sender.run sender in
+    let senderThread = Sender.start sender in
     (* first: do the handshake *)
     match _handshake state istream sender with
         | (true, Some peerName) ->
@@ -577,7 +640,7 @@ let _handler state id fd =
                 (Connection.create sender)
             ;
             (* thread to tick the peer *)
-            Sender.run_ticker sender state.tickTime;
+            Sender.start_ticker sender state.tickTime;
             (* current thread receive from peer *)
             let _ = try
                 _control state istream sender;
@@ -591,8 +654,8 @@ let _handler state id fd =
             (*TODO join ticker, sender, ... all threads
             register connection down in node
             Ticker.stop ticker;
-            Sender.stop sender;
             *)
+            Sender.stop sender;
             Trace.debug (lazy (Trace.printf
                 "End of connection\n"
             ));
@@ -619,7 +682,7 @@ let create nodeName =
                     flags = (Int32.logor 4l 256l); (* TODO set correct flags *)
                     cookie = "cookie"; (*TODO cookie as node option! *)
                     nodeName = nodeName;
-                    tickTime = 30.0; (*TODO which value? *)
+                    tickTime = 10.0; (*TODO which value? *)
                     connectionUpCB = connUpCB;
                     incomingMessageCB = incomingMessageCB;
             }
@@ -642,7 +705,7 @@ let create nodeName =
         thread = None;
     }
 
-let run server connectionUpCB incomingMessageCB =
+let start server connectionUpCB incomingMessageCB =
     let thr = Thread.create
         (fun () -> server.loop connectionUpCB incomingMessageCB)
         ()

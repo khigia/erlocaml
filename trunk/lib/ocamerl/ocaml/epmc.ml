@@ -109,7 +109,7 @@ let make_alive2_req epmc =
     req
 
 
-let make nodeServerName nodeServerPort = {
+let create nodeServerName nodeServerPort = {
     epmdName = "localhost";
     epmdPort = 4369;
     nodeServerName = nodeServerName;
