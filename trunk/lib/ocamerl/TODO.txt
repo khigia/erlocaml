@@ -1,0 +1,9 @@
+Re-organize the folder (no need for erl/ocaml folders; now everything is ocaml).
+
+Test:
+    * unit-tests (OUnit)
+    * functional tests
+
+Look at:
+    * ocaml-event (libevent)
+    * ocamlnet
