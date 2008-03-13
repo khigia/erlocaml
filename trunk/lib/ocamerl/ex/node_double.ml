@@ -13,14 +13,17 @@ let create_double_process node name =
     in
     Enode.Mbox.create_activity mbox recvCB
 
-try
-    Trace.inf "Node_double" "Creating node\n";
-    let n = Enode.create "ocaml@devhost" in
-    let _ = Enode.trace "    " n in
-    let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in
-    let _ = Enode.start n in
-    let _ = create_double_process n "bytwo" in
-    let _ = Thread.wait_signal [Sys.sigint] in
-    Enode.stop n
-with
-    exn -> Printf.printf "ERROR:%s\n" (Printexc.to_string exn)
+let doit () =
+    try
+        Trace.inf "Node_double" "Creating node\n";
+        let n = Enode.create "ocaml@devhost" in
+        let _ = Enode.trace "    " n in
+        let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in
+        let _ = Enode.start n in
+        let _ = create_double_process n "bytwo" in
+        let _ = Thread.wait_signal [Sys.sigint] in
+        Enode.stop n
+    with
+        exn -> Printf.printf "ERROR:%s\n" (Printexc.to_string exn)
+
+let _  = doit ()

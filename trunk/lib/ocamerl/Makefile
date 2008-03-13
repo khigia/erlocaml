@@ -1,60 +1,7 @@
-LIB_TARGET_NAME=oe
-LIB_TARGET=${LIB_TARGET_NAME}.cma
-LIB_INTERFACES=
-LIB_SOURCES=\
-	trace.ml\
-	tools.ml\
-	fifo.ml\
-	fsm.ml\
-	serv.ml\
-	eterm.ml\
-	epmc.ml\
-	econn.ml\
-	enode.ml
-LIB_OBJECTS=${LIB_SOURCES:.ml=.cmo}
+.PHONY: all
+all:
+	ocamlbuild ex/node_double.byte
 
-EXE_SOURCES=$(wildcard ex/*.ml)
-EXE_OBJECTS=${EXE_SOURCES:.ml=.cmo}
-EXE_TARGETS=${EXE_SOURCES:.ml=}
-
-OCAMLC_OPT=-pp 'camlp4o' -thread unix.cma threads.cma
-
-.PHONY: all clean doc test
-
-all: .depends ${LIB_TARGET} ${EXE_TARGETS} otop
-
-.depends: ${LIB_INTERFACES} ${LIB_SOURCES} ${EXE_SOURCES}
-	ocamldep -pp 'camlp4o' ${LIB_INTERFACES} ${LIB_SOURCES} ${EXE_SOURCES} > .depends
-
--include .depends
-
-${LIB_TARGET}: ${LIB_OBJECTS}
-	ocamlc -a -o ${LIB_TARGET} ${LIB_OBJECTS}
-
-${EXE_TARGETS}: ${LIB_TARGET}
-
-otop:
-	ocamlmktop -o otop ${OCAMLC_OPT} ${LIB_TARGET} -cclib -lthreads
-
-%:%.ml
-	ocamlc ${OCAMLC_OPT} ${LIB_TARGET} -o $* $< $>
-
-%.cmi:%.mli
-	ocamlc ${OCAMLC_OPT} -c $<
-
-%.cmo:%.ml
-	ocamlc ${OCAMLC_OPT} -c $<
-
-doc:
-	-mkdir -p html
-	ocamldoc -html -d ./html ${LIB_SOURCES} ${EXE_SOURCES}
-
+.PHONY: clean
 clean:
-	-rm -f otop
-	-rm -f ${LIB_OBJECTS:.cmo=.cmi} ${LIB_OBJECTS} ${LIB_TARGET}
-	-rm -f ${EXE_OBJECTS:.cmo=.cmi} ${EXE_OBJECTS} ${EXE_TARGETS}
-	-rm -f .depends
-	-rm -rf html
-
-test:
-	find test/ -perm /a+x ! -type d -exec \{} \;
+	ocamlbuild -clean

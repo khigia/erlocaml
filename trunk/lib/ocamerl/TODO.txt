@@ -1,8 +1,3 @@
-Re-organize the folder (no need for erl/ocaml folders; now everything is ocaml).
-
-Build system:
-ocamlbuild (see also http://cduce.org/~abate/ocamlbuild-camlp4-ocamlfind)
-
 Logging:
 pa_log http://www.cs.nyu.edu/~cconway/tools/index.html
 
