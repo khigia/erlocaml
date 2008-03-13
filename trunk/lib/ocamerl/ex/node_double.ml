@@ -1,3 +1,5 @@
+open Ocamerl
+
 let create_double_process node name =
     let mbox = Enode.create_mbox node in
     let _ = Enode.register_mbox node mbox name in
