@@ -7,10 +7,16 @@ type 'a t = {
 }
 
 let create () = {
-    queue = Queue.create();
-    mutex = Mutex.create();
-    not_empty = Condition.create();
+    queue = Queue.create ();
+    mutex = Mutex.create ();
+    not_empty = Condition.create ();
 }
+
+let is_empty q =
+    Mutex.lock q.mutex;
+    let isEmpty = Queue.is_empty q.queue in
+    Mutex.unlock q.mutex;
+    isEmpty
 
 let length q =
     Mutex.lock q.mutex;
@@ -33,6 +39,7 @@ let get q =
     Mutex.unlock q.mutex;
     i
 
+(*TODO unit tests *)
 let test () =
     let tn = 100 in (* thread number *)
     let gn = 10 in (* each thread try to get/put gn times *)

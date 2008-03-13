@@ -1,9 +1,19 @@
 Re-organize the folder (no need for erl/ocaml folders; now everything is ocaml).
 
+Build system:
+ocamlbuild (see also http://cduce.org/~abate/ocamlbuild-camlp4-ocamlfind)
+
+Logging:
+pa_log http://www.cs.nyu.edu/~cconway/tools/index.html
+
 Test:
     * unit-tests (OUnit)
     * functional tests
 
 Look at:
-    * ocaml-event (libevent)
+    * event-based system 
+        * ocaml-event (libevent) http://www.xs4all.nl/~mmzeeman/ocaml
+        * Ocaml-NAE (iom, cf) http://sourceforge.net/projects/ocnae
     * ocamlnet
+    * equeue
+    * jocaml

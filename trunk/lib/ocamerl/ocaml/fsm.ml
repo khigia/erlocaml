@@ -28,6 +28,7 @@ let create state handler =
         handler = handler;
     }
 
+(* TODO clean name: state is use for fsm global state as well as the state the fsm is in *)
 let mkstate f = Some (State_f f)
 
 let send fsm event =

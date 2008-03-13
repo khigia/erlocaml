@@ -104,11 +104,19 @@ and e_pid =
         * int  (* serial number *)
         * int  (* node creation ID *)
 
-let pid_node_name pid =
-    match pid with
-        | ET_pid (name, _, _, _) -> name
+let et_pid_node_name pid = match pid with
+    | ET_pid (name, _, _, _) -> name
 
-let make_pid nodeName pid_num serial creation =
+let e_pid_to_string pid = match pid with
+    (nodeName, pidNum, pidSerial, nodeCreation) ->
+        Printf.sprintf
+            "PID(%s, %i, %i, %i)"
+            nodeName
+            pidNum
+            pidSerial
+            nodeCreation
+
+let make_e_pid nodeName pid_num serial creation =
     (
         nodeName,
         pid_num,
@@ -127,13 +135,7 @@ let rec to_string t = match t with
         (List.fold_left (fun acc e -> acc ^ (to_string e) ^ ",") "[" s) ^ "]"
     | ET_improper_list (head, tail) ->
         (List.fold_left (fun acc e -> acc ^ to_string e) "[" head) ^ (to_string tail) ^ "]"
-    | ET_pid (nodeName, pidNum, pidSerial, nodeCreation) ->
-        Printf.sprintf
-            "PID(%s, %i, %i, %i)"
-            nodeName
-            pidNum
-            pidSerial
-            nodeCreation
+    | ET_pid pid -> e_pid_to_string pid
     | ET_ref (node, idList, creation) ->
         Printf.sprintf
             "Ref(%s, %s, %i)"

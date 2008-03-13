@@ -1,9 +1,8 @@
 let create_double_process node name =
     let mbox = Enode.create_mbox node in
     let _ = Enode.register_mbox node mbox name in
-    let rec recv_loop = fun () ->
-        let msg = Enode.Mbox.receive mbox in
-        (match msg with
+    let recvCB = fun msg ->
+        match msg with
             | Eterm.ET_tuple arg ->
                 (* TODO failing cases ... *)
                 let toPid = arg.(0) in
@@ -11,13 +10,11 @@ let create_double_process node name =
                     | Eterm.ET_int i ->
                         Enode.send node toPid (Eterm.ET_int (Int32.mul i 2l))
             (* TODO failing cases ... *)
-        );
-        recv_loop ()
     in
-    Thread.create recv_loop ()
+    Enode.Mbox.create_activity mbox recvCB
 
 try
-    Trace.printf "Creating node\n";
+    Trace.inf "Node_double" "Creating node\n";
     let n = Enode.create "ocaml@devhost" in
     let _ = Enode.trace "    " n in
     let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in

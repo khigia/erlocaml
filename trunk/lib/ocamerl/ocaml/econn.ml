@@ -28,11 +28,6 @@ module Handshake = struct
         match challenge with
             | Some value ->
                 let expected = _compute_digest value cookie in
-                (*Trace.debug (lazy (Trace.printf
-                    "Check digest\nExpected: %s\nReceived: %s\n"
-                    (Digest.to_hex expected)
-                    (Digest.to_hex peerDigest)
-                ));*)
                 expected = peerDigest
             | None ->
                 false
@@ -133,10 +128,10 @@ module Handshake = struct
         let len = List.length chars in
         let head = Tools.chars_of_int len 2 in
         let r = Tools.implode (head @ chars) in
-        Trace.debug (lazy (Trace.printf
+        Trace.dbg "Econn"
             "Packed handshake msg: %s\n"
             (Tools.dump_hex r "<<" ">>" " ")
-        ));
+        ;
         r
 
 
@@ -158,9 +153,7 @@ module Handshake = struct
         | Msg_challenge_rsp (peerChallenge, digest) ->
             match _check_digest digest st.cookie st.challenge with
                 | true ->
-                    Trace.debug (lazy (Trace.printf
-                        "Peer digest OK\n"
-                    ));
+                    Trace.dbg "Econn" "Peer digest OK\n";
                     (* reply to peer challenge *)
                     let reply = Msg_challenge_digest
                         (_compute_digest peerChallenge st.cookie)
@@ -176,16 +169,14 @@ module Handshake = struct
                         [reply;]
                     )
                 | false ->
-                    Trace.debug (lazy (Trace.printf
-                        "Handshake failed: peer digest NOT ok\n"
-                    ));
+                    Trace.dbg "Econn" "Handshake failed: peer digest NOT ok\n";
                     (* handshake failing here! *)
                     (st, None, Some (false, None), [])
         | _ ->
-            Trace.debug (lazy (Trace.printf
+            Trace.dbg "Econn"
                 "Handshake failed: got wrong message: %s\n"
                 (message_to_string msg)
-            ));
+            ;
             (* handshake failing here! *)
             (st, None, Some (false, None), [])
 
@@ -321,10 +312,6 @@ module Control = struct
         let len = List.length chars in
         let head = Tools.chars_of_int len 4 in
         let r = Tools.implode (head @ chars) in
-        (*
-        Trace.printf "Packed control msg: %s\n"
-            (Tools.dump_hex r "<<" ">>" " ");
-        *)
         r
 
 end (* module Control *)
@@ -357,7 +344,7 @@ module Ticker = struct
         Mutex.lock ticker.actLock;
         ticker.lastActivity <- now ();
         Mutex.unlock ticker.actLock;
-        Trace.printf
+        Trace.dbg "Econn"
             "Ticker: last activity: %f\n"
             ticker.lastActivity
 
@@ -381,7 +368,7 @@ module Ticker = struct
                     let delta = since -. ticker.tickTime in
                     ignore (match delta >= 0.0 with
                         | true ->
-                            Trace.printf "Ticker: %f is time to tick\n" (now ());
+                            Trace.dbg "Econn" "Ticker: %f is time to tick\n" (now ());
                             let _ = match ticker.tickCB with
                                 | Some f -> f ()
                                 | None -> ()
@@ -395,7 +382,7 @@ module Ticker = struct
                             _loop checkFreq
                     )
                 | _ ->
-                    Trace.printf "Ticker is stopping\n";
+                    Trace.dbg "Econn" "Ticker is stopping\n";
                     Trace.flush ()
         in
         (*Thread.create _loop ticker.tickTime*)
@@ -432,7 +419,7 @@ module Sender = struct
         }
 
     let tick sender =
-        Trace.printf "Sender is ticking\n";
+        Trace.dbg "Econn" "Sender is ticking\n";
         Trace.flush ();
         Fifo.put sender.queue tickData
 
@@ -448,14 +435,14 @@ module Sender = struct
             let msg = Fifo.get sender.queue in
             match msg with
                 | Data data ->
-                    Trace.printf "Sender sent one packet\n";
+                    Trace.dbg "Econn" "Sender sent one packet\n";
                     Trace.flush ();
                     output_string sender.ochannel data;
                     flush sender.ochannel;
                     _loop ()
                 | Ctrl code ->
                     (* any control message stop the loop *)
-                    Trace.printf "Sender is stopping\n"
+                    Trace.dbg "Econn" "Sender is stopping\n"
         in
         let thr = Thread.create _loop () in
         sender.thread <- Some thr;
@@ -503,7 +490,7 @@ module Connection = struct
             toPid;
         ]) in
         let msg = Control.Msg_p (dest, Some msg) in
-        Trace.printf
+        Trace.dbg "Econn"
             "Sending control message: %s\n"
             (Control.message_to_string msg);
         Trace.flush ();
@@ -516,6 +503,7 @@ end (* module Connection *)
 type t = {
     addr: Unix.inet_addr;
     port: int;
+    sock: Unix.file_descr;
     loop: connCB -> inMsgCB -> unit;
     mutable thread: Thread.t option;
 }
@@ -545,13 +533,13 @@ let _handshake st istream sender =
         let msg = try
             Handshake.message_of_stream istream
         with
-        Stream.Failure ->
+            Stream.Failure ->
                 failwith "Handshake stream failure"
         in
-        Trace.debug (lazy (Trace.printf
+        Trace.dbg "Econn"
             "Received handshake message: %s\n"
             (Handshake.message_to_string msg)
-        ));
+        ;
         match Fsm.send fsm msg with
             | (Some result, actions) ->
                 _do_actions sender actions;
@@ -578,7 +566,7 @@ let rec _control state istream sender =
         Stream.Failure ->
             let data = Stream.npeek 256 istream in
             let buf = Tools.implode data in
-            Trace.printf
+            Trace.dbg "Econn"
                 "Dump of stream: %s\n"
                 (Tools.dump_hex buf "<<" ">>" ",")
             ;
@@ -587,16 +575,14 @@ let rec _control state istream sender =
     in
     let _ = match msg with
         | Control.Msg_tick ->
-            Trace.debug (lazy (Trace.printf
-                "Received tick control message\n"
-            ))
+            Trace.dbg "Econn" "Received tick control message\n"
             (* TODO check that peer continue to tick
             and else set connection down *)
         | Control.Msg_p (ectrl, arg) ->
-            Trace.debug (lazy (Trace.printf
+            Trace.dbg "Econn"
                 "Received control message: %s\n"
                 (Control.message_to_string msg)
-            ));
+            ;
             let c = match ectrl with Eterm.ET_tuple c -> c in
             (match c.(0) with
                 | Eterm.ET_int 6l (*TODO cste*) ->
@@ -606,15 +592,13 @@ let rec _control state istream sender =
                         state.incomingMessageCB dest a
                     with
                         exn ->
-                            Trace.printf
+                            Trace.dbg "Econn"
                                 "Incoming message not handled: %s\n"
                                 (Printexc.to_string exn)
                 (*TODO lot of cases to handle *)
             )
         | Control.Msg_any (tag, data) ->
-            Trace.debug (lazy (Trace.printf
-                "Ignoring unknow control message\n"
-            ))
+            Trace.dbg "Econn" "Ignoring unknow control message\n"
     in
     Trace.flush ();
     _control state istream sender
@@ -631,9 +615,7 @@ let _handler state id fd =
     (* first: do the handshake *)
     match _handshake state istream sender with
         | (true, Some peerName) ->
-            Trace.debug (lazy (Trace.printf
-                "Handshake OK\n"
-            ));
+            Trace.dbg "Econn" "Handshake OK\n";
             (* register the connection in node *)
             state.connectionUpCB
                 peerName
@@ -644,37 +626,30 @@ let _handler state id fd =
             (* current thread receive from peer *)
             let _ = try
                 _control state istream sender;
-                Trace.printf "(normal?) end of control\n"
+                Trace.dbg "Econn" "(normal?) end of control\n"
             with
                 exn ->
-                    Trace.printf
-                        "ERROR in control loop: %s\n"
+                    Trace.err "Econn"
+                        "error in control loop: %s\n"
                         (Printexc.to_string exn)
             in
-            (*TODO join ticker, sender, ... all threads
-            register connection down in node
-            Ticker.stop ticker;
-            *)
+            (*TODO register connection down in node *)
             Sender.stop sender;
-            Trace.debug (lazy (Trace.printf
-                "End of connection\n"
-            ));
+            Trace.dbg "Econn" "End of connection\n";
             Trace.flush ();
         | _ ->
-            Trace.info (lazy (Trace.printf
-                "Close connection comming from unauthorized node\n"
-            ));
+            Trace.inf "Econn" "Close connection comming from unauthorized node\n";
             Unix.close fd
 
 
 let create nodeName =
     let sock = Serv.listen 0 in
     let addr, port = Serv.inet_addr sock in
-    Trace.debug (lazy (Trace.printf
+    Trace.dbg "Econn"
         "Node server listening on port %i (node '%s')\n"
         port
         nodeName
-    ));
+    ;
     Trace.flush ();
     let handler connUpCB incomingMessageCB =
         Serv.handle_in_thread ( Serv.trace_handler ( Serv.make_handler (
@@ -689,18 +664,16 @@ let create nodeName =
         )))
     in
     let server connUpCB incomingMessageCB =
-        let _ = try
+        try
             Serv.accept_loop 0 sock (handler connUpCB incomingMessageCB)
         with
             exn ->
-                Trace.printf "ERROR: exception in server";
-                print_newline ()
-        in
-        print_endline "End of node server!!!"
+                Trace.inf "Econn" "Exception in server (may be stopping)\n"
     in
     {
         addr = addr;
         port = port;
+        sock = sock;
         loop = server;
         thread = None;
     }
@@ -712,3 +685,12 @@ let start server connectionUpCB incomingMessageCB =
     in
     server.thread <- Some thr
 
+let stop server =
+    Trace.dbg "Econn" "Node server is stopping\n";
+    Trace.todo "Econn" "connections must be stop/unregistered\n";
+    let _ = Unix.shutdown server.sock Unix.SHUTDOWN_ALL in
+    let _ = match server.thread with
+        | Some thr -> Thread.join thr
+        | None -> ()
+    in
+    Trace.inf "Econn" "Node server stopped\n"

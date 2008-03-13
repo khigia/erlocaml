@@ -1,8 +1,6 @@
 
 try
-    let _ = Trace.info (lazy (Trace.printf
-        "Creating node\n"
-    )) in
+    let _ = Trace.inf "Create_node" "Creating node\n" in
     let n = Enode.create "ocaml@devhost" in
     let _ = Enode.trace "    " n in
 

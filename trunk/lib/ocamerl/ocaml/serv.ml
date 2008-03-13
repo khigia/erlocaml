@@ -20,8 +20,9 @@ let make_handler f id sd =
         f id sd
     with
         exn ->
-            Trace.printf
-                "ERROR:handler of coonection %i: %s\n"
+            Trace.err
+                "Serv"
+                "handler of connection %i: %s\n"
                 id
                 (Printexc.to_string exn);
     in
@@ -29,15 +30,16 @@ let make_handler f id sd =
         Unix.close sd
     with
         exn ->
-            Trace.printf
-                "ERROR:handler finalizer:%s\n"
+            Trace.err
+                "Serv"
+                "handler finalizer:%s\n"
                 (Printexc.to_string exn)
 
 let trace_handler handler id sd =
-    Trace.printf "Handle connection %i" id;
+    Trace.inf "Serv" "Handle connection %i" id;
     print_newline ();
     let r = handler id sd in
-    Trace.printf "End of connection %i" id;
+    Trace.inf "Serv" "End of connection %i" id;
     print_newline ();
     r
 
@@ -54,16 +56,14 @@ let listen port =
     sock
 
 let accept_once id sock handler =
-    Trace.debug (lazy (Trace.printf
-        "Blocked on accept\n"
-    ));
-    Trace.flush;
+    Trace.dbg "Serv" "Blocked on accept\n";
+    Trace.flush ();
     let (sd, sa) = Unix.accept sock in 
-    Trace.debug (lazy (Trace.printf
+    Trace.dbg
+        "Serv"
         "New connection from %s\n"
         (client_addr sa)
-    ));
-    print_endline "";
+    ;
     handler id sd
 
 let rec accept_loop id sock handler_f =
@@ -72,8 +72,8 @@ let rec accept_loop id sock handler_f =
 
 let serve port handler =
     let sock = listen port in
-    Trace.printf "Server listening on port %i" port;
-    print_newline ();
+    Trace.inf "Serv" "Listening on port %i" port;
+    Trace.flush ();
     try
         accept_loop
             0
@@ -81,6 +81,5 @@ let serve port handler =
             handler
     with
         exn ->
-            Trace.printf "ERROR: exception in server";
-            print_newline ()
+            Trace.err "Serv" "Exception in server";
 
