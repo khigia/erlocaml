@@ -297,6 +297,12 @@ let create nodeName =
         connections = Hashtbl.create 10;
     }
 
+let local_name base =
+    String.concat "@" ["ocaml"; Unix.gethostname ();]
+
+let create_local name =
+    create (local_name name)
+
 let start node =
     let _ = publish node in
     let _ = _create_net_kernel node in

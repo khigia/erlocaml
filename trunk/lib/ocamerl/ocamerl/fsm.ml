@@ -38,6 +38,7 @@ let send fsm event =
             fsm.state <- state;
             fsm.handler <- handler;
             (answer, actions)
+            (* TODO no need for answer+action: if app need it, can do it! *)
         | None ->
             (None, [])
             

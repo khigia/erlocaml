@@ -1,7 +1,9 @@
+OCAMLBUILD=ocamlbuild -classic-display
+
 .PHONY: all
 all:
-	ocamlbuild ex/node_double.byte
+	${OCAMLBUILD} ex/node_double.byte
 
 .PHONY: clean
 clean:
-	ocamlbuild -clean
+	${OCAMLBUILD} -clean
