@@ -1,17 +1,6 @@
 open Ocamerl
 open Eterm
 
-(*
-let terms =
-    List.fold_left
-        (fun acc x -> match x with
-            | (DataSet.Exact t, _) -> t :: acc
-            | _ -> acc
-        )
-        []
-        DataSet.dataset
-        *)
-
 let _check_string_not_empty s =
     let len = String.length s in
     OUnit.assert_bool "empty string" (len > 0)
@@ -26,26 +15,45 @@ let _ = Tests.register "to_string" (fun () ->
         DataSet.dataset
 )
 
-let _ = Tests.register "to_chars" (fun () ->
+let _ = Tests.register "to_binary" (fun () ->
     List.iter
         (fun x -> match x with
             | (DataSet.Exact t, e) ->
-                let chars = to_chars t in
+                let bin = to_binary t in
                 begin
                 match e with
-                    | Some (_ :: r) ->
-                        OUnit.assert_equal chars r
+                    | Some l ->
+                        OUnit.assert_equal bin (Tools.implode l)
                     | None ->
                         ()
-                    | _ ->
-                        OUnit.assert_failure "wrong binary trnasformation"
                 end
             | _ -> ()
         )
         DataSet.dataset
 )
 
-(* TODO to_binary, of_stream *)
+let _ = Tests.register "of_stream" (fun () ->
+    List.iter
+        (fun x -> match x with
+            | (o, Some l) ->
+                let ebin = Tools.implode l in
+                let stream = Stream.of_string ebin in
+                let eterm = Eterm.of_stream stream in
+                (match o with
+                    | DataSet.Exact t ->
+                        OUnit.assert_bool
+                            "left some binary data after parsing"
+                            (Stream.peek stream == None);
+                        OUnit.assert_equal t eterm
+                    | DataSet.Match matcher ->
+                        OUnit.assert_bool
+                            "parse result don't match expectation"
+                            (matcher eterm)
+                )
+            | _ -> ()
+        )
+        DataSet.dataset
+)
 
 let _ = Tests.register "et_pid_node_name" (fun () ->
     let name = "mypid" in

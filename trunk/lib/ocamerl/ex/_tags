@@ -1,0 +1,2 @@
+<*.ml>: pkg_threads
+<*.byte>: pkg_threads

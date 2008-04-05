@@ -19,6 +19,7 @@ test/dataSet.ml: beam/datagen.beam
 	erl -noshell -pa beam -s datagen doit -s init stop > test/dataSet.ml
 
 beam/datagen.beam: test/datagen.erl
+	mkdir -p beam
 	erlc -o beam test/datagen.erl
 
 .PHONY: clean

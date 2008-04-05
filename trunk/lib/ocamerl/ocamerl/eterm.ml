@@ -82,7 +82,7 @@ let rec to_string t = match t with
             creation
 
 (* TODO can probably be optimized ... *)
-let rec to_chars t = match t with
+let rec _to_chars t = match t with
     | ET_int n when n < 256l ->
         magic_small_int :: [char_of_int (Int32.to_int n)]
     | ET_int n ->
@@ -96,14 +96,14 @@ let rec to_chars t = match t with
         :: (Tools.chars_of_int (String.length a) 2)
         @ (Tools.explode a)
     | ET_bool b ->
-        to_chars (ET_atom (string_of_bool b))
+        _to_chars (ET_atom (string_of_bool b))
     | ET_tuple arr ->
         let acc0 = if (Array.length arr) < 256
             then magic_small_tuple :: (char_of_int (Array.length arr)) :: []
             else magic_large_tuple :: (Tools.chars_of_int (Array.length arr) 4)
         in
         Array.fold_left
-            (fun acc e -> acc @ (to_chars e))
+            (fun acc e -> acc @ (_to_chars e))
             acc0
             arr
     | ET_string s ->
@@ -113,23 +113,23 @@ let rec to_chars t = match t with
     | ET_list l ->
         magic_list
         :: (Tools.chars_of_int (List.length l) 4)
-        @ (List.fold_left (fun acc e -> acc @ (to_chars e)) [] l)
+        @ (List.fold_left (fun acc e -> acc @ (_to_chars e)) [] l)
         @ [magic_nil]
     | ET_improper_list (l, tail) ->
         magic_list
         :: (Tools.chars_of_int (List.length l) 4)
-        @ (List.fold_left (fun acc e -> to_chars e) [] l)
-        @ (to_chars tail)
+        @ (List.fold_left (fun acc e -> _to_chars e) [] l)
+        @ (_to_chars tail)
     | ET_pid (node, id, serial, creation) ->
         magic_pid
-        :: (to_chars (ET_atom node))
+        :: (_to_chars (ET_atom node))
         @  (Tools.chars_of_int id 4)
         @  (Tools.chars_of_int serial 4)
         @  (Tools.chars_of_int creation 1)
     | ET_ref (node, ids, creation) ->
         magic_new_reference
         :: (Tools.chars_of_int (List.length ids) 2)
-        @  (to_chars (ET_atom node))
+        @  (_to_chars (ET_atom node))
         @  (Tools.chars_of_int creation 1)
         @  (List.fold_left
             (fun acc e -> (acc @ Tools.chars_of_int32 e 4))
@@ -138,9 +138,9 @@ let rec to_chars t = match t with
         )
 
 
-(* this is not an erlang binary term, only the encoded term format send on wire *)
+(* Return the "Erlang external term format" of an ocaml Eterm *)
 let to_binary t =
-    Tools.implode (magic_version :: (to_chars t))
+    Tools.implode (magic_version :: (_to_chars t))
 
 let rec of_stream =
     parser [< 'i ; stream >] ->

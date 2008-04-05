@@ -1,0 +1,5 @@
+"econn.ml": camlp4o
+"eterm.ml": camlp4o
+"epmc.ml": camlp4o
+<*.ml>: pkg_threads
+

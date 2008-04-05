@@ -1,6 +1,10 @@
 Logging:
 pa_log http://www.cs.nyu.edu/~cconway/tools/index.html
 
+Doc:
+    * ocamlbuild ocamerl/eterm.inferred.mli
+    * ocamldoc
+
 Test:
     * unit-tests (OUnit)
     * functional tests

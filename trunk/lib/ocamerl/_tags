@@ -1,8 +1,1 @@
 <ocamerl/*.cmx>: for-pack(Ocamerl)
-"ocamerl/econn.ml": camlp4o
-"ocamerl/eterm.ml": camlp4o
-"ocamerl/epmc.ml": camlp4o
-<ocamerl/*.ml>: pkg_threads
-<test/*.*>: pkg_oUnit, pkg_threads
-<ex/*.ml>: pkg_threads
-<ex/*.byte>: pkg_threads
