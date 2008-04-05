@@ -17,5 +17,5 @@ let create_suite name =
 
 let run name =
     let suite = create_suite name in
-    run_test_tt_main suite
+    run_test_tt ~verbose:true suite
 

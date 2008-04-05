@@ -238,8 +238,8 @@ module Control = struct
     type msg =
         | Msg_tick
         | Msg_p of
-              Eterm.eterm        (* control message *)
-            * Eterm.eterm option (* optional parameter *)
+              Eterm.t        (* control message *)
+            * Eterm.t option (* optional parameter *)
         | Msg_any of
               char   (* tag? *)
             * string (* raw binary data *)
@@ -516,7 +516,7 @@ and handler_state = {
     incomingMessageCB: inMsgCB;
 }
 and connCB = string -> Connection.t -> unit
-and inMsgCB = Eterm.eterm -> Eterm.eterm -> unit
+and inMsgCB = Eterm.t -> Eterm.t -> unit
 
 let distr_version = 5
 

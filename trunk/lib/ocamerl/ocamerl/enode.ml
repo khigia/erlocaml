@@ -12,7 +12,7 @@ module Mbox = struct
         mutable activity: Thread.t option;
     }
     and queueElement =
-        | Data of Eterm.eterm
+        | Data of Eterm.t
         | Ctrl of int
 
     let ctrl_stop = Ctrl 0

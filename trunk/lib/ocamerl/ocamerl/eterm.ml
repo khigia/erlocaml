@@ -15,19 +15,19 @@ let magic_new_reference = '\114'
 
 (* Mapping of Erlang term to Ocaml type *)
 
-type eterm =
+type t =
     | ET_int    of Int32.t
     | ET_float  of float
     | ET_atom   of e_atom
     | ET_bool   of bool
     | ET_tuple  of e_tuple
     | ET_string of string
-    | ET_list   of eterm list
-    | ET_improper_list of eterm list * eterm
+    | ET_list   of t list
+    | ET_improper_list of t list * t
     | ET_pid    of e_pid
     | ET_ref    of e_ref
 and e_atom = string
-and e_tuple = eterm array
+and e_tuple = t array
 and e_pid = 
         e_atom (* node name *)
         * int  (* pid number *)
@@ -39,14 +39,11 @@ and e_ref =
         * int          (* creation *)
 
 
-(* Shortcuts for specialized ETerm manipulation *)
+(* Specialized ETerm manipulation *)
 
 let et_pid_node_name pid = match pid with
     | ET_pid (name, _, _, _) -> name
     | _ -> failwith "ETerm.et_pid_node_name: eterm is not a PID"
-
-
-(* Management of ETerm internal data *)
 
 let e_pid_to_string pid = match pid with
     (nodeName, pidNum, pidSerial, nodeCreation) ->
@@ -84,60 +81,61 @@ let rec to_string t = match t with
             )
             creation
 
-let rec to_chars t =
-    match t with
-        | ET_int n when n < 256l ->
-            magic_small_int :: [char_of_int (Int32.to_int n)]
-        | ET_int n ->
-            magic_large_int :: (Tools.chars_of_int32 n 4)
-        | ET_float f ->
-            let s = Printf.sprintf "%.20e" f in
-            let pad = String.make (31 - (String.length s)) '\000' in
-            magic_float :: (Tools.explode s) @ (Tools.explode pad)
-        | ET_atom a  ->
-            magic_atom_or_bool
-            :: (Tools.chars_of_int (String.length a) 2)
-            @ (Tools.explode a)
-        | ET_bool b ->
-            to_chars (ET_atom (string_of_bool b))
-        | ET_tuple arr ->
-            let acc0 = if (Array.length arr) < 256
-                then magic_small_tuple :: (char_of_int (Array.length arr)) :: []
-                else magic_large_tuple :: (Tools.chars_of_int (Array.length arr) 4)
-            in
-            Array.fold_left
-                (fun acc e -> acc @ (to_chars e))
-                acc0
-                arr
-        | ET_string s ->
-            magic_string
-            :: (Tools.chars_of_int (String.length s) 2)
-            @ (Tools.explode s)
-        | ET_list l ->
-            magic_list
-            :: (Tools.chars_of_int (List.length l) 4)
-            @ (List.fold_left (fun acc e -> to_chars e) [] l)
-        | ET_improper_list (l, tail) ->
-            magic_list
-            :: (Tools.chars_of_int (List.length l) 4)
-            @ (List.fold_left (fun acc e -> to_chars e) [] l)
-            @ (to_chars tail)
-        | ET_pid (node, id, serial, creation) ->
-            magic_pid
-            :: (to_chars (ET_atom node))
-            @  (Tools.chars_of_int id 4)
-            @  (Tools.chars_of_int serial 4)
-            @  (Tools.chars_of_int creation 1)
-        | ET_ref (node, ids, creation) ->
-            magic_new_reference
-            :: (Tools.chars_of_int (List.length ids) 2)
-            @  (to_chars (ET_atom node))
-            @  (Tools.chars_of_int creation 1)
-            @  (List.fold_left
-                (fun acc e -> (acc @ Tools.chars_of_int32 e 4))
-                []
-                ids
-            )
+(* TODO can probably be optimized ... *)
+let rec to_chars t = match t with
+    | ET_int n when n < 256l ->
+        magic_small_int :: [char_of_int (Int32.to_int n)]
+    | ET_int n ->
+        magic_large_int :: (Tools.chars_of_int32 n 4)
+    | ET_float f ->
+        let s = Printf.sprintf "%.20e" f in
+        let pad = String.make (31 - (String.length s)) '\000' in
+        magic_float :: (Tools.explode s) @ (Tools.explode pad)
+    | ET_atom a  ->
+        magic_atom_or_bool
+        :: (Tools.chars_of_int (String.length a) 2)
+        @ (Tools.explode a)
+    | ET_bool b ->
+        to_chars (ET_atom (string_of_bool b))
+    | ET_tuple arr ->
+        let acc0 = if (Array.length arr) < 256
+            then magic_small_tuple :: (char_of_int (Array.length arr)) :: []
+            else magic_large_tuple :: (Tools.chars_of_int (Array.length arr) 4)
+        in
+        Array.fold_left
+            (fun acc e -> acc @ (to_chars e))
+            acc0
+            arr
+    | ET_string s ->
+        magic_string
+        :: (Tools.chars_of_int (String.length s) 2)
+        @ (Tools.explode s)
+    | ET_list l ->
+        magic_list
+        :: (Tools.chars_of_int (List.length l) 4)
+        @ (List.fold_left (fun acc e -> acc @ (to_chars e)) [] l)
+        @ [magic_nil]
+    | ET_improper_list (l, tail) ->
+        magic_list
+        :: (Tools.chars_of_int (List.length l) 4)
+        @ (List.fold_left (fun acc e -> to_chars e) [] l)
+        @ (to_chars tail)
+    | ET_pid (node, id, serial, creation) ->
+        magic_pid
+        :: (to_chars (ET_atom node))
+        @  (Tools.chars_of_int id 4)
+        @  (Tools.chars_of_int serial 4)
+        @  (Tools.chars_of_int creation 1)
+    | ET_ref (node, ids, creation) ->
+        magic_new_reference
+        :: (Tools.chars_of_int (List.length ids) 2)
+        @  (to_chars (ET_atom node))
+        @  (Tools.chars_of_int creation 1)
+        @  (List.fold_left
+            (fun acc e -> (acc @ Tools.chars_of_int32 e 4))
+            []
+            ids
+        )
 
 
 (* this is not an erlang binary term, only the encoded term format send on wire *)
