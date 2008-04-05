@@ -45,6 +45,7 @@ let send fsm event =
 
 
 (* TODO move in unit-tests *)
+(*
 
 type test_st = {
     t:   int;
@@ -77,3 +78,4 @@ let test () =
     List.iter print_endline fsm.state.acc
 
 let _ = test ()
+*)
