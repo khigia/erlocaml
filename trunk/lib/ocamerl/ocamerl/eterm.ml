@@ -13,99 +13,40 @@ let magic_list          = '\108'
 let magic_new_reference = '\114'
 
 
-module EBinary =
-    struct
-        type t = string
-
-        let make l = Tools.implode l
-
-        let to_string b = Tools.dump_dec b "<<" ">>"
-    end
-
-
-module ETuple =
-    struct
-        type 'a t = 'a array
-
-        let make l = Array.of_list l
-
-        let fold_left f i t =
-            Array.fold_left f i t
-
-        let to_string f tuple =
-            fold_left (fun s e -> s ^ (f e) ^ ",") "" tuple
-        
-        let to_chars f tuple =
-            match (Array.length tuple) < 256 with
-                | true ->
-                    magic_small_tuple :: ( (char_of_int (Array.length tuple)) :: (
-                        fold_left (fun acc e -> acc @ (f e)) [] tuple
-                    ))
-                | false ->
-                    magic_large_tuple :: ( (Tools.chars_of_int (Array.length tuple) 4) @ (
-                        fold_left (fun acc e -> acc @ (f e)) [] tuple
-                    ))
-    end
-
-module ETupler = functor(ET: sig
-        type t
-        val to_string : t -> string
-        val to_chars : t -> char list
-    end ) ->
-    struct
-        type t = ET.t array
-
-        let make l = Array.of_list l
-
-        let fold_left f i t =
-            Array.fold_left f i t
-
-        let to_string tuple =
-            fold_left (fun s e -> s ^ (ET.to_string e) ^ ",") "" tuple
-        
-        let to_chars tuple =
-            match (Array.length tuple) < 256 with
-                | true ->
-                    magic_small_tuple :: ( (char_of_int (Array.length tuple)) :: (
-                        fold_left (fun acc e -> acc @ (ET.to_chars e)) [] tuple
-                    ))
-                | false ->
-                    magic_large_tuple :: ( (Tools.chars_of_int (Array.length tuple) 4) @ (
-                        fold_left (fun acc e -> acc @ (ET.to_chars e)) [] tuple
-                    ))
-    end
-
+(* Mapping of Erlang term to Ocaml type *)
 
 type eterm =
-    | ET_int of Int32.t
-    | ET_float of float
-    | ET_atom of e_atom
-    | ET_bool of bool
-    | ET_tuple of e_tuple
+    | ET_int    of Int32.t
+    | ET_float  of float
+    | ET_atom   of e_atom
+    | ET_bool   of bool
+    | ET_tuple  of e_tuple
     | ET_string of string
-    | ET_list of eterm list
+    | ET_list   of eterm list
     | ET_improper_list of eterm list * eterm
-    | ET_pid of e_pid
-    | ET_ref of
-          e_atom
-        * Int32.t list
-        * int          (* creation *)
+    | ET_pid    of e_pid
+    | ET_ref    of e_ref
 and e_atom = string
-and e_tuple = eterm ETuple.t
-    (*TODO should be possible to define Tuple with a functor:
-    Tupler(struct type eterm val to_string: eterm -> string end)
-    so that using the tuple is easier: no need to pass the
-    to_string or to_chars functions each time
-    ... but then to_string and to_chars need to be define first! argh!!!
-    *)
+and e_tuple = eterm array
 and e_pid = 
         e_atom (* node name *)
         * int  (* pid number *)
         * int  (* serial number *)
         * int  (* node creation ID *)
+and e_ref =
+          e_atom
+        * Int32.t list
+        * int          (* creation *)
+
+
+(* Shortcuts for specialized ETerm manipulation *)
 
 let et_pid_node_name pid = match pid with
     | ET_pid (name, _, _, _) -> name
+    | _ -> failwith "ETerm.et_pid_node_name: eterm is not a PID"
+
+
+(* Management of ETerm internal data *)
 
 let e_pid_to_string pid = match pid with
     (nodeName, pidNum, pidSerial, nodeCreation) ->
@@ -116,20 +57,16 @@ let e_pid_to_string pid = match pid with
             pidSerial
             nodeCreation
 
-let make_e_pid nodeName pid_num serial creation =
-    (
-        nodeName,
-        pid_num,
-        serial,
-        creation
-    )
+
+(* ETerm API *)
 
 let rec to_string t = match t with
     | ET_int n   -> Int32.to_string n
     | ET_float n -> string_of_float n
     | ET_atom a  -> a
     | ET_bool b  -> string_of_bool b
-    | ET_tuple l -> "{" ^ (ETuple.to_string to_string l) ^ "}"
+    | ET_tuple arr ->
+        Array.fold_left (fun s e -> s ^ (to_string e) ^ ",") "{" arr ^ "}"
     | ET_string s -> "\"" ^ s ^ "\""
     | ET_list s ->
         (List.fold_left (fun acc e -> acc ^ (to_string e) ^ ",") "[" s) ^ "]"
@@ -163,8 +100,15 @@ let rec to_chars t =
             @ (Tools.explode a)
         | ET_bool b ->
             to_chars (ET_atom (string_of_bool b))
-        | ET_tuple l ->
-            ETuple.to_chars to_chars l
+        | ET_tuple arr ->
+            let acc0 = if (Array.length arr) < 256
+                then magic_small_tuple :: (char_of_int (Array.length arr)) :: []
+                else magic_large_tuple :: (Tools.chars_of_int (Array.length arr) 4)
+            in
+            Array.fold_left
+                (fun acc e -> acc @ (to_chars e))
+                acc0
+                arr
         | ET_string s ->
             magic_string
             :: (Tools.chars_of_int (String.length s) 2)
@@ -196,8 +140,9 @@ let rec to_chars t =
             )
 
 
+(* this is not an erlang binary term, only the encoded term format send on wire *)
 let to_binary t =
-    EBinary.make (magic_version :: (to_chars t))
+    Tools.implode (magic_version :: (to_chars t))
 
 let rec of_stream =
     parser [< 'i ; stream >] ->
@@ -229,8 +174,8 @@ and magic_parse tag =
         | n when n = magic_nil     -> parse_nil
         | n when n = magic_string  -> parse_string
         | n when n = magic_list    -> parse_list
-        (* TODO small big *)
-        (* TODO large big *)
+        (* TODO small bin *)
+        (* TODO large bin *)
         (* TODO new cache *)
         (* TODO cached atom *)
         (* TODO fun *)
@@ -260,11 +205,11 @@ and parse_atom_or_bool =
 
 and parse_small_tuple =
     parser [< n = Tools.eint_n 1; a = terms n [] >] ->
-        ET_tuple (ETuple.make a)
+        ET_tuple (Array.of_list a)
 
 and parse_large_tuple =
     parser [< n = Tools.eint_n 4; a = terms n [] >] ->
-        ET_tuple (ETuple.make a)
+        ET_tuple (Array.of_list a)
 
 and parse_string =
     parser [< n = Tools.eint_n 2; data = Tools.string_n n >] ->
@@ -322,3 +267,5 @@ and parse_ids n acc stream =
                 parse_ids (n-1) (id :: acc) s
             end
             stream
+        | _ ->
+            failwith "Eterm.of_stream: bad id list construct"

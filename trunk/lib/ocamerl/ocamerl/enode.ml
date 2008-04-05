@@ -100,12 +100,7 @@ module PidManager = struct
             | None ->
                 failwith "cannot create pid: creation ID not defined"
             | Some n ->
-                let pid = Eterm.make_e_pid
-                    nodeName
-                    self.count
-                    self.serial
-                    n
-                in
+                let pid = (nodeName, self.count, self.serial, n) in
                 let _ = _increment self in
                 pid
 
@@ -259,7 +254,7 @@ let _create_net_kernel node =
                             | Eterm.ET_atom "is_auth" ->
                                 let toPid = arg1.(0) in
                                 let ref = arg1.(1) in
-                                let rsp = Eterm.ET_tuple (Eterm.ETuple.make [ref; Eterm.ET_atom "yes"]) in
+                                let rsp = Eterm.ET_tuple [|ref; Eterm.ET_atom "yes"|] in
                                 send node toPid rsp
                         )
             (* TODO failing cases ... *)

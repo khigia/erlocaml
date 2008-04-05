@@ -484,11 +484,11 @@ module Connection = struct
     }
 
     let send conn toPid msg =
-        let dest = Eterm.ET_tuple (Eterm.ETuple.make [
+        let dest = Eterm.ET_tuple [|
             Eterm.ET_int 2l; (* TODO cste *)
             Eterm.ET_atom ""; (* cookie ... *)
             toPid;
-        ]) in
+        |] in
         let msg = Control.Msg_p (dest, Some msg) in
         Trace.dbg "Econn"
             "Sending control message: %s\n"
