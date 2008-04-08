@@ -9,8 +9,9 @@ OCAMLBUILD=ocamlbuild -classic-display
 
 
 .PHONY: all
-all: generated
+all: generated doc
 	$(OCAMLBUILD) ocamerl.cma ${EX_BYTE} ${TEST_BYTE}
+
 
 .PHONY: generated
 generated: test/dataSet.ml
@@ -22,11 +23,10 @@ beam/datagen.beam: test/datagen.erl
 	mkdir -p beam
 	erlc -o beam test/datagen.erl
 
-.PHONY: clean
-clean:
-	$(OCAMLBUILD) -clean
-	@rm -vf test/dataSet.ml
-	@rm -vf beam/*.beam
+.PHONY: doc
+doc:
+	$(OCAMLBUILD) ocamerl/ocamerl.docdir/index.html
+
 
 .PHONY: test
 test: all utest
@@ -35,3 +35,10 @@ test: all utest
 .PHONY: utest
 utest: all
 	for i in ${TEST_BYTE} ; do ./`basename $$i` ; done
+
+.PHONY: clean
+clean:
+	$(OCAMLBUILD) -clean
+	@rm -vf test/dataSet.ml
+	@rm -vf beam/*.beam
+

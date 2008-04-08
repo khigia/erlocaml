@@ -18,23 +18,21 @@ let magic_new_reference = '\114'
 type t =
     | ET_int    of Int32.t
     | ET_float  of float
-    | ET_atom   of e_atom
+    | ET_atom   of string
     | ET_bool   of bool
-    | ET_tuple  of e_tuple
+    | ET_tuple  of t array
     | ET_string of string
     | ET_list   of t list
     | ET_improper_list of t list * t
     | ET_pid    of e_pid
     | ET_ref    of e_ref
-and e_atom = string
-and e_tuple = t array
 and e_pid = 
-        e_atom (* node name *)
+        string (* node name *)
         * int  (* pid number *)
         * int  (* serial number *)
         * int  (* node creation ID *)
 and e_ref =
-          e_atom
+          string
         * Int32.t list
         * int          (* creation *)
 

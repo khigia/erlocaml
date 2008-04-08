@@ -1,6 +1,9 @@
 Logging:
 pa_log http://www.cs.nyu.edu/~cconway/tools/index.html
 
+Build:
+    * mlpack or mllib?
+
 Doc:
     * ocamlbuild ocamerl/eterm.inferred.mli
     * ocamldoc
