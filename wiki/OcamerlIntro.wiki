@@ -1,0 +1,22 @@
+#summary Erlang node written in Ocaml, kind of ml_interface.
+
+= Introduction =
+
+Ocamerl is an attempt to implement an Erlang node completely in Ocaml:
+ * offer a simple mapping of basic Erlang term in Ocaml;
+ * maintains connection to EPMD;
+ * maintains connections with other Erlang nodes;
+ * enable to send/receive Erlang messages from processes on any nodes using the "Erlang external term format";
+
+
+= Build =
+
+Use a standard Makefile to run _ocamlbuild_.
+
+Require:
+  * ocaml 3.10.2
+  * ocamlfind/findlib 1.2.1
+  * [http://www.xs4all.nl/~mmzeeman/ocaml OUnit 1.0.2] (optional)
+
+Known to run on:
+  * GNU/Linux Ubuntu 7.10
