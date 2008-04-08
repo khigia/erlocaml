@@ -7,10 +7,48 @@ EX_BYTE   =${EX_SOURCES:.ml=.byte}
 
 OCAMLBUILD=ocamlbuild -classic-display
 
+TARGETS=\
+    ocamerl.cma \
+    ocamerl/ocamerl.docdir/index.html \
+    ${EX_BYTE}
 
-.PHONY: all
-all: generated doc
-	$(OCAMLBUILD) ocamerl.cma ${EX_BYTE} ${TEST_BYTE}
+TEST_TARGETS=\
+	$(TARGETS) \
+    $(TEST_BYTE)
+
+
+.PHONY: main
+main: main_build test
+
+.PHONY: main_build
+main_build:
+	$(OCAMLBUILD) $(TARGETS)
+
+
+.PHONY: dev
+dev: dev_build utest test
+
+.PHONY: dev_build
+dev_build: generated
+	$(OCAMLBUILD) $(TEST_TARGETS)
+
+
+.PHONY: clean
+clean:
+	$(OCAMLBUILD) -clean
+	@rm -vf test/dataSet.ml
+	@rm -vf beam/*.beam
+
+
+.PHONY: test
+# no rule dependency ... rule used as a function
+test:
+	@for i in ${TEST_SHELL} ; do echo -n "Running '$$i': " ; $$i > /dev/null ; r=$$? && echo "$$r" ; done
+
+.PHONY: utest
+# no rule dependency ... rule used as a function
+utest:
+	@for i in ${TEST_BYTE} ; do ./`basename $$i` ; done
 
 
 .PHONY: generated
@@ -22,23 +60,4 @@ test/dataSet.ml: beam/datagen.beam
 beam/datagen.beam: test/datagen.erl
 	mkdir -p beam
 	erlc -o beam test/datagen.erl
-
-.PHONY: doc
-doc:
-	$(OCAMLBUILD) ocamerl/ocamerl.docdir/index.html
-
-
-.PHONY: test
-test: all utest
-	for i in ${TEST_SHELL} ; do $$i ; done
-
-.PHONY: utest
-utest: all
-	for i in ${TEST_BYTE} ; do ./`basename $$i` ; done
-
-.PHONY: clean
-clean:
-	$(OCAMLBUILD) -clean
-	@rm -vf test/dataSet.ml
-	@rm -vf beam/*.beam
 
