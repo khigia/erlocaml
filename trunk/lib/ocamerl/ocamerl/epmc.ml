@@ -169,7 +169,7 @@ let alive2_connection epmc =
             in
             Event.sync evt;
             Trace.dbg "Epmc" "Sync on receiving stop_event\n";
-            let thr = Thread.create _receive_message_loop istream in
+            let _thr = Thread.create _receive_message_loop istream in
             let stopEvent = Event.receive stop_event in
             ignore (Event.sync stopEvent)
             (* not implemented??? Thread.kill thr *)

@@ -1,16 +1,15 @@
-Logging:
-pa_log http://www.cs.nyu.edu/~cconway/tools/index.html
-
 Build:
     * mlpack or mllib?
+    * what about a common lib (mainly eterm) usable for F#
 
 Doc:
     * ocamlbuild ocamerl/eterm.inferred.mli
-    * ocamldoc
 
 Test:
-    * unit-tests (OUnit)
-    * functional tests
+    * lot of unit-tests are missing
+
+Logging:
+    * pa_log http://www.cs.nyu.edu/~cconway/tools/index.html
 
 Look at:
     * event-based system 
