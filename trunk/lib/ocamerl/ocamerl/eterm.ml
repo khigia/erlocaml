@@ -136,9 +136,12 @@ let rec _to_chars t = match t with
         )
 
 
-(* Return the "Erlang external term format" of an ocaml Eterm *)
+let to_chars t =
+    magic_version :: (_to_chars t)
+
 let to_binary t =
-    Tools.implode (magic_version :: (_to_chars t))
+    Tools.implode (to_chars t)
+
 
 let rec of_stream =
     parser [< 'i ; stream >] ->

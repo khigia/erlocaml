@@ -23,6 +23,9 @@ val to_string : t -> string
 (** Return the encoded binary of an Eterm. *)
 val to_binary : t -> string
 
+(** Return the encoded binary of an Eterm as byte sequence. *)
+val to_chars : t -> char list
+
 (** Parse one Eterm from binary form. *)
 val of_stream : char Stream.t -> t
 

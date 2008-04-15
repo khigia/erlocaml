@@ -320,11 +320,11 @@ module Control = struct
             []
         | Msg_p (ctrl, None) ->
             tag_control
-            :: (Tools.explode (Eterm.to_binary ctrl)) (* TODO chars list to string to list ... *)
+            :: (Eterm.to_chars ctrl)
         | Msg_p (ctrl, Some msg) ->
             tag_control
-            :: (Tools.explode (Eterm.to_binary ctrl)) (* TODO chars list to string to list ... *)
-            @  (Tools.explode (Eterm.to_binary msg)) (* TODO chars list to string to list ... *)
+            :: (Eterm.to_chars ctrl)
+            @  (Eterm.to_chars msg)
         | _ ->
             failwith ("not implemented: cannot encode message: " ^ (message_to_string msg))
 
