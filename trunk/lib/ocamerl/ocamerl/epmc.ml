@@ -1,4 +1,5 @@
 module Packing = struct
+
     let tag_alive2_req = '\120'
     let tag_alive2_rsp = '\121'
 
@@ -49,7 +50,7 @@ module Packing = struct
     let _message_to_chars msg = match msg with
         | Msg_alive2_req (
             tag,
-            nodeServerPort,
+            nodePort,
             nodeType,
             protocol,
             (distrRangeMin, distrRangeMax),
@@ -57,7 +58,7 @@ module Packing = struct
             extra
             ) ->
                tag
-            :: (Tools.chars_of_int (nodeServerPort) 2)
+            :: (Tools.chars_of_int (nodePort) 2)
             @  nodeType
             :: char_of_int protocol
             :: (Tools.chars_of_int (distrRangeMin) 2)
@@ -78,139 +79,104 @@ module Packing = struct
 end (* module Packing *)
 
 
+type host_t = {
+    name: string;
+    port: int;
+}
+
+type conn_t = {
+    input: in_channel;
+    output: out_channel;
+}
+
 type t = {
-    epmdName: string;
-    epmdPort: int;
-    nodeServerName: string;
-    nodeServerPort: int;
-    mutable activity: Thread.t option;
+    epmd: host_t;
+    mutable node: host_t option;
+    mutable conn: conn_t option;
 }
 
 
-let make_alive2_req epmc =
-    let nodeName =
+(* Tools to manage TCP connection *)
+
+let make_host name port =
+    {name = name; port = port}
+
+let node_name name =
+    try
+        let len = String.index name '@' in
+        String.sub name 0 len
+    with
+        Not_found -> name
+
+let _close_connection conn =
+    (match conn with
+    | Some conn ->
+        Unix.shutdown_connection conn.input;
+        Trace.dbg "Epmc" "End of connection to EPMD\n"
+    | None ->
+        ()
+    )
+    
+let _open_connection epmd =
+    let ic, oc = (
         try
-            let len = String.index epmc.nodeServerName '@' in
-            String.sub epmc.nodeServerName 0 len
+            let addr = (Unix.gethostbyname(epmd.name)).Unix.h_addr_list.(0) in
+            let sock_addr = Unix.ADDR_INET(addr, epmd.port) in
+            Unix.open_connection sock_addr
         with
-            Not_found ->
-                epmc.nodeServerName
-    in
-    let extra = "" in
+            Unix.Unix_error(_, _, _) ->
+                Trace.dbg "Epmc" "Cannot open connection to EPMD\n";
+                failwith "Unix error cause end of thread"
+    ) in
+    {input=ic; output=oc;}
+
+
+(* Exchanges req/rsp defined in EPMD protocol *)
+
+let _register conn node =
+    (* send alive2 req *)
     let req = Packing.Msg_alive2_req (
         Packing.tag_alive2_req,
-        epmc.nodeServerPort,
+        node.port,
         Packing.node_type_hidden,
         0,
         Packing.distr_vsn_range,
-        nodeName,
-        extra
+        node_name node.name,
+        "" (* extra *)
     ) in
-    req
+    let bin = Packing.pack_msg req in
+    output_string conn.output bin;
+    flush conn.output;
+    (* recv alive2 rsp *)
+    let istream = Stream.of_channel conn.input in
+    let rsp = Packing.message_of_stream istream in (*TODO may raise Stream.failure *)
+    match rsp with
+        | Packing.Msg_alive2_rsp (0, creation) ->
+            Trace.dbg "Epmc" "Connected!\n";
+            Some creation
+        | _ ->
+            Trace.inf "Epmc" "Registration of node failed!\n";
+            None
 
 
-let create nodeServerName nodeServerPort = {
-    epmdName = "localhost";
-    epmdPort = 4369;
-    nodeServerName = nodeServerName;
-    nodeServerPort = nodeServerPort;
-    activity = None;
+(* Visible API *)
+
+let create ?(epmdName="localhost") ?(epmdPort=4369) () = {
+    epmd = make_host epmdName epmdPort;
+    conn = None;
+    node = None;
 }
 
-let stop_event = Event.new_channel ()
-
-let published_event = Event.new_channel ()
-
-let _receive_message istream =
-    try
-        Packing.message_of_stream istream
-    with
-        Stream.Failure ->
-            Stream.dump print_char istream;
-            failwith "got stream failure"
-
-let _received_message msg =
-    Trace.dbg "Epmc"
-        "Got message: %s\n"
-        (Packing.message_to_string msg)
-    ;
-    msg
-
-let rec _receive_message_loop istream =
-    let msg = _receive_message istream in
-    let _ = _received_message msg in
-    _receive_message_loop istream
-
-let alive2_connection epmc =
-    (* TODO sync on event make difficult to handle failure cases*)
-    let ic, oc = (try
-        let addr = (Unix.gethostbyname(epmc.epmdName)).Unix.h_addr_list.(0) in
-        let sock_addr = Unix.ADDR_INET(addr, epmc.epmdPort) in
-        Unix.open_connection sock_addr
-    with
-        Unix.Unix_error(_, _, _) ->
-            Trace.dbg "Epmc" "Sync on sending published_event\n";
-            let publishedEvent = Event.send published_event None in
-            Event.sync publishedEvent;
-            Trace.dbg "Epmc" "Prematured end of EPM connection\n";
-            failwith "Unix error cause end of thread"
-    ) in
-    let istream = Stream.of_channel ic in
-    let alive2 = make_alive2_req epmc in
-    let bin = Packing.pack_msg alive2 in
-    output_string oc bin;
-    flush oc;
-    let msg = _receive_message istream in
-    (match msg with
-        | Packing.Msg_alive2_rsp (0, creation) ->
-            Trace.dbg "Epmc" "Sync on sending published_event\n";
-            let evt = Event.send
-                published_event (Some creation)
-            in
-            Event.sync evt;
-            Trace.dbg "Epmc" "Sync on receiving stop_event\n";
-            let _thr = Thread.create _receive_message_loop istream in
-            let stopEvent = Event.receive stop_event in
-            ignore (Event.sync stopEvent)
-            (* not implemented??? Thread.kill thr *)
-        | _ ->
-            Trace.dbg "Epmc" "Sync on sending published_event\n";
-            let evt = Event.send published_event None in
-            Event.sync evt
-    );
-    Unix.shutdown_connection ic;
-    Trace.dbg "Epmc" "End of EPM connection\n"
-
-let connect epmc =
-    (* TODO connect only if not yet connected *)
-    Trace.inf "Epmc"
-        "Epmc connecting to EPMD(%s, %i) for node '%s' listening on port %i\n"
-        epmc.epmdName
-        epmc.epmdPort
-        epmc.nodeServerName
-        epmc.nodeServerPort
-    ;
-    let thr = Thread.create alive2_connection epmc in
-    Trace.dbg "Epmc" "Sync on receiving published_event\n";
-    let publishedEvent = Event.receive published_event in
-    let result = Event.sync publishedEvent in
-    (match result with
-        | Some creation ->
-            ignore(epmc.activity <- Some thr)
-        | None ->
-            ()
-    );
-    result
+let connect epmc nodeName nodePort =
+    _close_connection epmc.conn;
+    let conn = _open_connection epmc.epmd in
+    let node = make_host nodeName nodePort in
+    epmc.node <- Some node;
+    epmc.conn <- Some conn;
+    _register conn node
 
 let disconnect epmc =
-    match epmc.activity with
-        | Some thr ->
-            Trace.dbg "Epmc" "Sync on sending of stop_event\n";
-            let stopEvent = Event.send stop_event "closing" in
-            Event.sync stopEvent;
-            Thread.join thr;
-            epmc.activity <- None;
-            ()
-        | None ->
-            ()
+    _close_connection epmc.conn;
+    epmc.node <- None;
+    epmc.conn <- None
 

@@ -507,7 +507,7 @@ module Connection = struct
     let send conn toPid msg =
         let dest = Eterm.ET_tuple [|
             Eterm.ET_int 2l; (* TODO cste *)
-            Eterm.ET_atom ""; (* cookie ... *)
+            Eterm.ET_atom ""; (* TODO cookie ... *)
             toPid;
         |] in
         let msg = Control.Msg_p (dest, Some msg) in

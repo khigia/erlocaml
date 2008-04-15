@@ -1,12 +1,13 @@
+Info:
+    * External term format and distribution is now part of ERTS doc:
+      http://www.erlang.org/doc/apps/erts/part_frame.html
+
 Build:
     * mlpack or mllib?
     * what about a common lib (mainly eterm) usable for F#
 
-Doc:
-    * ocamlbuild ocamerl/eterm.inferred.mli
-
 Test:
-    * lot of unit-tests are missing
+    * lot of mli/doc/unit-tests are missing
 
 Logging:
     * pa_log http://www.cs.nyu.edu/~cconway/tools/index.html

@@ -262,7 +262,7 @@ let is_published node =
 let publish node =
     (* TODO check not already published! *)
     (* TODO should this function fail if publication fails? *)
-    match Epmc.connect node.epmc with
+    match Epmc.connect node.epmc node.name node.server.Econn.port with
         | Some creation ->
             PidManager.init node.pids creation
         | None ->
@@ -275,7 +275,7 @@ let unpublish node =
 let create nodeName =
     Trace.inf "Enode" "Making node '%s'\n" nodeName;
     let server = Econn.create nodeName in
-    let epmc = Epmc.create nodeName server.Econn.port in
+    let epmc = Epmc.create () in
     let pids = PidManager.create in
     let mboxes = MboxManager.create in
     {
