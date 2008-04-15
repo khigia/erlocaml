@@ -60,6 +60,15 @@ module Handshake = struct
                 distr
                 flags
                 name
+        | Msg_status s ->
+            Printf.sprintf "Msg_status(%s)" s
+        | Msg_challenge_req (distr, flags, challenge, node) ->
+            Printf.sprintf
+                "Msg_challenge_req(%i, %lu, %lu, %s)"
+                distr
+                flags
+                challenge
+                node
         | Msg_challenge_rsp (challenge, digest) ->
             Printf.sprintf
                 "Msg_challenge_rsp(%lu, 0x%s)"
@@ -122,6 +131,8 @@ module Handshake = struct
         | Msg_challenge_digest digest ->
             tag_challenge_digest
             :: (Tools.explode digest)
+        | _ ->
+            failwith ("not implemented: cannot encode message: " ^ (message_to_string msg))
 
     let pack msg =
         let chars = _message_to_chars msg in
@@ -151,27 +162,32 @@ module Handshake = struct
 
     let _st_recv_challenge_rsp st msg = match msg with
         | Msg_challenge_rsp (peerChallenge, digest) ->
-            match _check_digest digest st.cookie st.challenge with
+            (match _check_digest digest st.cookie st.challenge with
                 | true ->
                     Trace.dbg "Econn" "Peer digest OK\n";
                     (* reply to peer challenge *)
                     let reply = Msg_challenge_digest
                         (_compute_digest peerChallenge st.cookie)
                     in
-                    (* handshake OK! *)
-                    let peerNode = match st.peerNode with
-                        | Some node -> node
-                    in
-                    (
-                        st,
-                        None, (* end of FSM *)
-                        Some (true, Some peerNode.name), (* handshake finished and ok *)
-                        [reply;]
+                    (match st.peerNode with
+                        | Some peerNode ->
+                            (* handshake OK! *)
+                            (
+                                st,
+                                None, (* end of FSM *)
+                                Some (true, Some peerNode.name), (* handshake finished and ok *)
+                                [reply;]
+                            )
+                        | _ ->
+                            (* handshake failing here! *)
+                            Trace.dbg "Econn" "Handshake failed: peer node name NOT ok\n";
+                            (st, None, Some (false, None), [])
                     )
                 | false ->
                     Trace.dbg "Econn" "Handshake failed: peer digest NOT ok\n";
                     (* handshake failing here! *)
                     (st, None, Some (false, None), [])
+            )
         | _ ->
             Trace.dbg "Econn"
                 "Handshake failed: got wrong message: %s\n"
@@ -182,34 +198,37 @@ module Handshake = struct
 
     let _st_recv_name st msg =
         let challenge = _create_challenge () in
-        let newSt = match msg with
+        match msg with
             | Msg_recv_name (
                 peerDistVsn,
                 peerFlags,
                 peerName
             ) ->
-                {st with
+                let newSt = {st with
                     challenge = Some challenge;
                     peerNode = Some {
                         version = peerDistVsn;
                         name    = peerName;
                         flags   = peerFlags;
                     };
-                }
-        in
-        let msgStatus = Msg_status "ok" in
-        let msgChallengeReq = Msg_challenge_req (
-            st.localNode.version,
-            st.localNode.flags,
-            challenge,
-            st.localNode.name
-        ) in
-        (
-            newSt,
-            (Fsm.mkstate _st_recv_challenge_rsp),
-            None,
-            [msgStatus; msgChallengeReq;]
-        )
+                } in
+                let msgStatus = Msg_status "ok" in
+                let msgChallengeReq = Msg_challenge_req (
+                    st.localNode.version,
+                    st.localNode.flags,
+                    challenge,
+                    st.localNode.name
+                ) in
+                (
+                    newSt,
+                    (Fsm.mkstate _st_recv_challenge_rsp),
+                    None,
+                    [msgStatus; msgChallengeReq;]
+                )
+            | _ ->
+                Trace.dbg "Econn" "Handshake failed: did not receive name\n";
+                (* handshake failing here! *)
+                (st, None, Some (false, None), [])
 
     let create_fsm version name cookie flags =
         (* TODO this is accepting fsm, need the fsm to handle
@@ -279,7 +298,7 @@ module Control = struct
             p stream
     and tag_parse len tag =
         match tag with
-            | tag_control -> parse_p len
+            | t when t = tag_control -> parse_p len
             | _ -> parse_any tag len
     and parse_p len =
         parser [< data = Tools.string_n len; >] ->
@@ -306,6 +325,8 @@ module Control = struct
             tag_control
             :: (Tools.explode (Eterm.to_binary ctrl)) (* TODO chars list to string to list ... *)
             @  (Tools.explode (Eterm.to_binary msg)) (* TODO chars list to string to list ... *)
+        | _ ->
+            failwith ("not implemented: cannot encode message: " ^ (message_to_string msg))
 
     let pack msg =
         let chars = _message_to_chars msg in
@@ -583,19 +604,26 @@ let rec _control state istream sender =
                 "Received control message: %s\n"
                 (Control.message_to_string msg)
             ;
-            let c = match ectrl with Eterm.ET_tuple c -> c in
-            (match c.(0) with
-                | Eterm.ET_int 6l (*TODO cste*) ->
-                    let dest = c.(3) in
-                    let a = match arg with Some c -> c in
-                    try
-                        state.incomingMessageCB dest a
-                    with
-                        exn ->
-                            Trace.dbg "Econn"
-                                "Incoming message not handled: %s\n"
-                                (Printexc.to_string exn)
-                (*TODO lot of cases to handle *)
+            (match ectrl, arg with
+            | (Eterm.ET_tuple [|
+                Eterm.ET_int 6l; (* TODO cste *)
+                _;
+                _;
+                dest;
+            |], Some a) ->
+                begin
+                try
+                    state.incomingMessageCB dest a
+                with
+                    exn ->
+                        Trace.dbg "Econn"
+                            "Incoming message not handled: %s\n"
+                            (Printexc.to_string exn)
+                end
+            | _ ->
+                Trace.dbg "Econn"
+                    "not implemented: ignore control message: %s\n"
+                    (Control.message_to_string msg)
             )
         | Control.Msg_any (tag, data) ->
             Trace.dbg "Econn" "Ignoring unknow control message\n"
@@ -611,7 +639,7 @@ let _handler state id fd =
     let istream = Stream.of_channel ic in
     (* sender is responsible of output connection *)
     let sender = Sender.create oc in
-    let senderThread = Sender.start sender in
+    let _senderThread = Sender.start sender in
     (* first: do the handshake *)
     match _handshake state istream sender with
         | (true, Some peerName) ->
@@ -622,11 +650,10 @@ let _handler state id fd =
                 (Connection.create sender)
             ;
             (* thread to tick the peer *)
-            Sender.start_ticker sender state.tickTime;
+            ignore(Sender.start_ticker sender state.tickTime);
             (* current thread receive from peer *)
             let _ = try
-                _control state istream sender;
-                Trace.dbg "Econn" "(normal?) end of control\n"
+                _control state istream sender
             with
                 exn ->
                     Trace.err "Econn"

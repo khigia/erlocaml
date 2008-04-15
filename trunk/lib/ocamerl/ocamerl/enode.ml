@@ -228,36 +228,31 @@ let _incoming_message node dest msg =
     (* dispatch message to the appropriate mbox *)
     match dest with
         | Eterm.ET_atom name ->
-            match find_mbox node name with
+            (match find_mbox node name with
                 | Some mbox ->
                     Mbox.push_message mbox msg
                 | _ ->
-                    failwith 
-                        (Printf.sprintf
-                            "dest not found (%s)"
-                            name
-                        )
-        (* TODO probably other like pid ... or at least a clean fail*)
+                    failwith ("dest not found: " ^ name)
+            )
+        | _ ->
+            (* TODO receive message adressed to direct pid *)
+            failwith ("not implemented: cannot receive message where dest is: " ^ (Eterm.to_string dest))
 
 let _create_net_kernel node =
     let mbox = create_mbox node in
     let _ = register_mbox node mbox "net_kernel" in
     let recvCB = fun msg ->
         match msg with
-            | Eterm.ET_tuple arg ->
-                (* TODO could we have a better interface to match tuple and all eterm? *)
-                match arg.(0) with
-                    | Eterm.ET_atom "$gen_call" ->
-                        let arg1 = match arg.(1) with Eterm.ET_tuple c -> c in
-                        let arg2 = match arg.(2) with Eterm.ET_tuple c -> c in
-                        (match arg2.(0) with
-                            | Eterm.ET_atom "is_auth" ->
-                                let toPid = arg1.(0) in
-                                let ref = arg1.(1) in
-                                let rsp = Eterm.ET_tuple [|ref; Eterm.ET_atom "yes"|] in
-                                send node toPid rsp
-                        )
-            (* TODO failing cases ... *)
+            | Eterm.ET_tuple [|
+                Eterm.ET_atom "$gen_call";
+                Eterm.ET_tuple [| toPid; ref; |];
+                Eterm.ET_tuple [| Eterm.ET_atom "is_auth"; _; |]
+            |] ->
+                let rsp = Eterm.ET_tuple [|ref; Eterm.ET_atom "yes"|] in
+                send node toPid rsp    
+            | _ ->
+                let s = Eterm.to_string msg in
+                failwith ("unexpected msg: " ^ s)
     in
     Mbox.create_activity mbox recvCB
 
