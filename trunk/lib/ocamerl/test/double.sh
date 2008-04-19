@@ -9,7 +9,7 @@ erl -sname erl_test -setcookie cookie -noshell -s init stop
 
 echo; echo "Test $0: Run the ocaml server."
 # TODO hard coded cookie "cookie" :(
-./node_double.byte $OCAML_NODE_NAME &
+./ex_node_double.byte $OCAML_NODE_NAME &
 OCAML_PID=$!
 sleep 0.5
 

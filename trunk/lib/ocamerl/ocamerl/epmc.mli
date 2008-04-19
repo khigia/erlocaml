@@ -10,3 +10,6 @@ val connect : t -> string -> int -> int option
 
 (** Disonnect client from EPMD server (thus unregister the node). *)
 val disconnect : t -> unit
+
+(** Query EPMD to get port of registered node. *)
+val node_port: t -> string -> int option
