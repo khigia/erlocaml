@@ -1,5 +1,8 @@
 module Handshake = struct
-    (* Only handshake application logic (no network code) *)
+    (* Only handshake application logic (no network code)
+
+    TODO check with documentation in erlang kernel application.
+    *)
 
     (* Constants *)
 
@@ -251,35 +254,24 @@ end (* module Handshake *)
 
 
 module Control = struct
+    (* TODO rename Control to ... what? Packing? *)
     
-    let tag_control = 'p'
+    let tag_pass_through = 'p' (* 112 *)
 
     type msg =
         | Msg_tick
         | Msg_p of
               Eterm.t        (* control message *)
             * Eterm.t option (* optional parameter *)
-        | Msg_any of
+        | Msg_any of (*TODO is this really used??? *)
               char   (* tag? *)
             * string (* raw binary data *)
 
     let message_to_string msg = match msg with
-        | Msg_tick ->
-            "Msg_tick"
-        | Msg_p (ctrl, None) ->
-            Printf.sprintf
-                "Msg_p(%s)"
-                (Eterm.to_string ctrl)
-        | Msg_p (ctrl, Some arg) ->
-            Printf.sprintf
-                "Msg_p(%s, %s)"
-                (Eterm.to_string ctrl)
-                (Eterm.to_string arg)
-        | Msg_any (tag, data) ->
-            Printf.sprintf
-                "Msg_any(%c, %s)"
-                tag
-                data
+        | Msg_tick               -> "Msg_tick"
+        | Msg_p (ctrl, None)     -> Printf.sprintf "Msg_p(%s)" (Eterm.to_string ctrl)
+        | Msg_p (ctrl, Some arg) -> Printf.sprintf "Msg_p(%s, %s)" (Eterm.to_string ctrl) (Eterm.to_string arg)
+        | Msg_any (tag, data)    -> Printf.sprintf "Msg_any(%c, %s)" tag data
 
     let rec message_of_stream = parser
         | [< len = Tools.eint_n 4; stream >] ->
@@ -298,7 +290,7 @@ module Control = struct
             p stream
     and tag_parse len tag =
         match tag with
-            | t when t = tag_control -> parse_p len
+            | t when t = tag_pass_through -> parse_p len
             | _ -> parse_any tag len
     and parse_p len =
         parser [< data = Tools.string_n len; >] ->
@@ -319,10 +311,10 @@ module Control = struct
         | Msg_tick ->
             []
         | Msg_p (ctrl, None) ->
-            tag_control
+            tag_pass_through
             :: (Eterm.to_chars ctrl)
         | Msg_p (ctrl, Some msg) ->
-            tag_control
+            tag_pass_through
             :: (Eterm.to_chars ctrl)
             @  (Eterm.to_chars msg)
         | _ ->
@@ -494,6 +486,24 @@ module Sender = struct
 end (* module Sender *)
 
 
+let tag_link           = 1l  (* {1, FromPid, ToPid}                          *)
+let tag_send           = 2l  (* {2, Cookie, ToPid}                 + message *)
+let tag_exit           = 3l  (* {3, FromPid, ToPid, Reason}                  *)
+let tag_unlink         = 4l  (* {4, FromPid, ToPid}                          *)
+let tag_node_link      = 5l  (* {5}                                          *)
+let tag_reg_send       = 6l  (* {6, FromPid, Cookie, ToName}       + message *)
+let tag_group_leader   = 7l  (* {7, FromPid, ToPid}                          *)
+let tag_exit2          = 8l  (* {8, FromPid, ToPid, Reason}                  *)
+let tag_send_tt        = 12l (* {12, Cookie, ToPid, TraceToken}    + message *)
+let tag_exit_tt        = 13l (* {13, FromPid, ToPid, TraceToken, Reason}     *) 
+let tag_reg_send_tt    = 16l (* {16, FromPid, Cookie, ToName, TraceToken}    *)
+let tag_exit2_tt       = 18l (* {18, FromPid, ToPid, TraceToken, Reason}     *)
+(* shall not be used (only for Erlang node, not hidden node) *)
+let tag_monitor_p      = 19l
+let tag_demonitor_p    = 20l
+let tag_monitor_p_exit = 21l
+
+
 module Connection = struct
 
     type t = {
@@ -506,7 +516,7 @@ module Connection = struct
 
     let send conn toPid msg =
         let dest = Eterm.ET_tuple [|
-            Eterm.ET_int 2l; (* TODO cste *)
+            Eterm.ET_int tag_send;
             Eterm.ET_atom ""; (* TODO cookie ... *)
             toPid;
         |] in
@@ -606,7 +616,7 @@ let rec _control state istream sender =
             ;
             (match ectrl, arg with
             | (Eterm.ET_tuple [|
-                Eterm.ET_int 6l; (* TODO cste *)
+                Eterm.ET_int tag_reg_send;
                 _;
                 _;
                 dest;

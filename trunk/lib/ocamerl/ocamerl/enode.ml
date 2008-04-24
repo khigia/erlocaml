@@ -273,25 +273,24 @@ let unpublish node =
     PidManager.reset node.pids
     
 let create nodeName =
-    Trace.inf "Enode" "Making node '%s'\n" nodeName;
-    let server = Econn.create nodeName in
+    let name =
+        if String.contains nodeName '@'
+        then nodeName
+        else String.concat "@" [nodeName; Unix.gethostname ();]
+    in
+    Trace.inf "Enode" "Making node '%s'\n" name;
+    let server = Econn.create name in
     let epmc = Epmc.create () in
     let pids = PidManager.create in
     let mboxes = MboxManager.create in
     {
-        name = nodeName;
+        name = name;
         epmc = epmc;
         server = server;
         pids = pids;
         mboxes = mboxes;
         connections = Hashtbl.create 10;
     }
-
-let local_name base =
-    String.concat "@" ["ocaml"; Unix.gethostname ();]
-
-let create_local name =
-    create (local_name name)
 
 let start node =
     let _ = publish node in

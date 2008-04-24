@@ -19,7 +19,7 @@ let doit () =
             | [| _; s; |] -> s
             | _ -> "ocaml"
         in
-        let n = Enode.create_local name in
+        let n = Enode.create name in
         let _ = Enode.trace "    " n in
         let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in
         let _ = Enode.start n in
