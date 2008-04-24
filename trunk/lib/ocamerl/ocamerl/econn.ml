@@ -514,7 +514,7 @@ module Connection = struct
         sender = sender;
     }
 
-    let send conn toPid msg =
+    let send_to_pid conn toPid msg =
         let dest = Eterm.ET_tuple [|
             Eterm.ET_int tag_send;
             Eterm.ET_atom ""; (* TODO cookie ... *)
@@ -531,26 +531,59 @@ module Connection = struct
 end (* module Connection *)
 
 
+module ConnManager = struct
+
+    type t = (string, Connection.t) Hashtbl.t
+
+    let create () =
+        Hashtbl.create 10
+
+    let connection_up self peerName conn =
+        Hashtbl.add self peerName conn
+
+    let get self peerName =
+        Hashtbl.find self peerName
+
+end (* module ConnManager *)
+
+
 type t = {
+    (* incoming connection (server) *)
     addr: Unix.inet_addr;
     port: int;
     sock: Unix.file_descr;
-    loop: connCB -> inMsgCB -> unit;
+    loop: connCB -> inMsgCB -> unit; (* TODO remove! *)
     mutable thread: Thread.t option;
+    (* alive connections *)
+    connections: ConnManager.t;
 }
 and handler_state = {
+    (*TODO most of this is node properties ... *)
     nodeName: string;
     cookie: string;
     flags: Int32.t;
     tickTime: float;
-    connectionUpCB: connCB;
+    connectionUpCB: connCB; (*TODO can disapear ... be replace by direct call to the ConnManager *)
     incomingMessageCB: inMsgCB;
 }
 and connCB = string -> Connection.t -> unit
 and inMsgCB = Eterm.t -> Eterm.t -> unit
 
+
 let distr_version = 5
 
+
+let listen_port self = self.port
+
+let send_to_pid self toPid msg =
+    let peerName = Eterm.et_pid_node_name toPid in
+    try
+        let conn = ConnManager.get self.connections peerName in
+        Connection.send_to_pid conn toPid msg
+    with
+        Not_found ->
+            (* TODO try to establish the connection *)
+            failwith "Cannot send message to pid: connection not found"
 
 let _handshake st istream sender =
     let _do_actions sender actions = List.iter
@@ -679,7 +712,8 @@ let _handler state id fd =
             Unix.close fd
 
 
-let create nodeName =
+let create nodeName cookie =
+    (* TODO server shall be in some sub module *)
     let sock = Serv.listen 0 in
     let addr, port = Serv.inet_addr sock in
     Trace.dbg "Econn"
@@ -692,7 +726,7 @@ let create nodeName =
         Serv.handle_in_thread ( Serv.trace_handler ( Serv.make_handler (
             _handler {
                     flags = (Int32.logor 4l 256l); (* TODO set correct flags *)
-                    cookie = "cookie"; (*TODO cookie as node option! *)
+                    cookie = cookie;
                     nodeName = nodeName;
                     tickTime = 10.0; (*TODO which value? *)
                     connectionUpCB = connUpCB;
@@ -711,16 +745,18 @@ let create nodeName =
         addr = addr;
         port = port;
         sock = sock;
-        loop = server;
+        loop = server; (* TODO no need to keep in record! *)
         thread = None;
+        connections = ConnManager.create ();
     }
 
-let start server connectionUpCB incomingMessageCB =
+let start self incomingMessageCB =
+    let connectionUpCB = ConnManager.connection_up self.connections in
     let thr = Thread.create
-        (fun () -> server.loop connectionUpCB incomingMessageCB)
+        (fun () -> self.loop connectionUpCB incomingMessageCB)
         ()
     in
-    server.thread <- Some thr
+    self.thread <- Some thr
 
 let stop server =
     Trace.dbg "Econn" "Node server is stopping\n";

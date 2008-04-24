@@ -205,7 +205,7 @@ let _register conn node =
     (* recv alive2 rsp *)
     match send_recv conn req with
         | Packing.Msg_alive2_rsp (0, creation) ->
-            Trace.dbg "Epmc" "Registered!";
+            Trace.dbg "Epmc" "Registered\n";
             Some creation
         | _ ->
             failwith "Epmc: Registration of node failed!"

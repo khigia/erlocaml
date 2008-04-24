@@ -2,8 +2,9 @@ Info:
     * External term format and distribution is now part of ERTS doc:
       http://www.erlang.org/doc/apps/erts/part_frame.html
 
-Build:
+Build/Distrib:
     * mlpack or mllib?
+    * GODI
     * what about a common lib (mainly eterm) usable for F#
 
 Test:
@@ -13,9 +14,7 @@ Logging:
     * pa_log http://www.cs.nyu.edu/~cconway/tools/index.html
 
 Look at:
-    * event-based system 
-        * ocaml-event (libevent) http://www.xs4all.nl/~mmzeeman/ocaml
-        * Ocaml-NAE (iom, cf) http://sourceforge.net/projects/ocnae
-    * ocamlnet
-    * equeue
+    * ocamlnet/equeue
     * jocaml
+    * ocaml-event (libevent) http://www.xs4all.nl/~mmzeeman/ocaml
+    * Ocaml-NAE (iom, cf) http://sourceforge.net/projects/ocnae

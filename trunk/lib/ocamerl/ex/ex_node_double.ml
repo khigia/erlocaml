@@ -19,8 +19,7 @@ let doit () =
             | [| _; s; |] -> s
             | _ -> "ocaml"
         in
-        let n = Enode.create name in
-        let _ = Enode.trace "    " n in
+        let n = Enode.create name ~cookie:"cookie" in
         let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in
         let _ = Enode.start n in
         let _ = create_double_process n "bytwo" in
