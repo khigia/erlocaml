@@ -1,14 +1,15 @@
 module Mbox = struct
 
+    type element =
+        | Data of Eterm.t
+        | Ctrl of int
+
     type t = {
         pid: Eterm.e_pid;
-        queue: queueElement Fifo.t;
+        queue: element Fifo.t;
         mutable name: string option;
         mutable activity: Thread.t option;
     }
-    and queueElement =
-        | Data of Eterm.t
-        | Ctrl of int
 
     let ctrl_stop = Ctrl 0
 
@@ -22,19 +23,19 @@ module Mbox = struct
     let name mbox =
         mbox.name
 
-    let set_name self name =
-        self.name = Some name
+    let _set_name self name =
+        self.name <- Some name
 
-    let push_message mbox msg =
+    let _new_message mbox msg =
         (* no limit on number of message. *)
         Fifo.put mbox.queue (Data msg)
 
-    let receive mbox =
+    let _receive mbox =
         Fifo.get mbox.queue
 
     let create_activity mbox recvCB =
         let rec recv_loop = fun () ->
-            let elt = receive mbox in
+            let elt = _receive mbox in
             match elt with
             | Data msg ->
                 recvCB msg;
@@ -61,7 +62,62 @@ module Mbox = struct
 end (* module Mbox *)
 
 
-module PidManager = struct
+module MboxManager : sig
+    type t
+    val create: unit -> t
+    val mboxes: t -> Mbox.t list
+    val make_mbox: t -> Eterm.e_pid -> Mbox.t
+    val register: t -> Mbox.t -> string -> unit
+    val unregister: t -> Mbox.t -> unit
+    val find_by_name: t -> string -> Mbox.t
+end = struct
+
+    type t = {
+        pidMboxMap: (Eterm.e_pid, Mbox.t) Hashtbl.t;
+        nameMboxMap: (string, Mbox.t) Hashtbl.t;
+    }
+
+    let create () = {
+        pidMboxMap = Hashtbl.create 10;
+        nameMboxMap = Hashtbl.create 10;
+    }
+
+    let mboxes self =
+        Hashtbl.fold
+            (fun k v acc -> v::acc)
+            self.pidMboxMap
+            []
+
+    let make_mbox self pid =
+        let mbox = Mbox.create pid in
+        Hashtbl.add self.pidMboxMap pid mbox;
+        mbox
+
+    let register self mbox name =
+        let _ = Mbox._set_name mbox name in
+        Hashtbl.add self.nameMboxMap name mbox
+
+    let unregister self mbox =
+        match Mbox.name mbox with
+        | Some name ->
+            Hashtbl.remove self.nameMboxMap name
+        | _ ->
+            ()
+
+    let find_by_name self name =
+        Hashtbl.find self.nameMboxMap name
+
+end (* module MboxManager *)
+
+
+module PidManager : sig
+    type t
+    val create: string -> t
+    val init: t -> int -> bool
+    val reset: t -> unit
+    val is_initialized: t -> bool
+    val make_pid: t -> Eterm.e_pid
+end = struct
 
     type t = {
         node: string;
@@ -111,46 +167,6 @@ module PidManager = struct
 end (* module PidManager *)
 
 
-module MboxManager = struct
-
-    type t = {
-        pidMboxMap: (Eterm.e_pid, Mbox.t) Hashtbl.t;
-        nameMboxMap: (string, Mbox.t) Hashtbl.t;
-    }
-
-    let create = {
-        pidMboxMap = Hashtbl.create 10;
-        nameMboxMap = Hashtbl.create 10;
-    }
-
-    let mboxes self =
-        Hashtbl.fold
-            (fun k v acc -> v::acc)
-            self.pidMboxMap
-            []
-
-    let make_mbox self pid =
-        let mbox = Mbox.create pid in
-        Hashtbl.add self.pidMboxMap pid mbox;
-        mbox
-
-    let register self mbox name =
-        let _ = Mbox.set_name mbox name in
-        Hashtbl.add self.nameMboxMap name mbox
-
-    let unregister self mbox =
-        match Mbox.name mbox with
-        | Some name ->
-            Hashtbl.remove self.nameMboxMap name
-        | _ ->
-            ()
-
-    let find_by_name self name =
-        Hashtbl.find self.nameMboxMap name
-
-end (* module MboxManager *)
-
-
 
 type t = {
     name: string;
@@ -186,7 +202,7 @@ let _receive node dest msg =
         begin
         try
             let mbox = MboxManager.find_by_name node.mboxes name in
-            Mbox.push_message mbox msg
+            Mbox._new_message mbox msg
         with
             Not_found ->
                 failwith ("dest not found: " ^ name)
@@ -214,11 +230,11 @@ let _create_net_kernel node =
     in
     Mbox.create_activity mbox recvCB
 
-let is_published node =
+let _is_published node =
     PidManager.is_initialized node.pids
 
 let _publish node =
-    if is_published node
+    if _is_published node
     then
         failwith "node already published"
     else
@@ -243,7 +259,7 @@ let create ?(cookie="") nodeName =
     let epmc = Epmc.create () in
     let connections = Econn.create name cookie in
     let pids = PidManager.create name in
-    let mboxes = MboxManager.create in
+    let mboxes = MboxManager.create () in
     {
         name = name;
         epmc = epmc;
