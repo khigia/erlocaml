@@ -4,8 +4,11 @@ let create_double_process node name =
     let mbox = Enode.create_mbox node in
     let _ = Enode.register_mbox node mbox name in
     let recvCB = fun msg -> match msg with
-        | Eterm.ET_tuple [|toPid; Eterm.ET_int i;|] ->
-            Enode.send node toPid (Eterm.ET_int (Int32.mul i 2l))
+        | Eterm.ET_tuple [|toPid; ref; Eterm.ET_int i;|] ->
+            Enode.send
+                node
+                toPid
+                (Eterm.ET_tuple [| ref; Eterm.ET_int (Int32.mul i 2l); |])
         | _ ->
             (* skip unknown message *)
             ()

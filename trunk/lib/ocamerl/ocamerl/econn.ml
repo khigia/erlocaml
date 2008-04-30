@@ -449,6 +449,7 @@ let send self name ctrl arg =
     with
         Not_found ->
             (* TODO try to establish the connection *)
+            Trace.dbg "Econn" "Cannot send message: connection not found";
             failwith "Cannot send message: connection not found"
 
 let create () = {

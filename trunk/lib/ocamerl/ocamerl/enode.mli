@@ -1,13 +1,17 @@
-(** Erlang node and mbox (equivalent of Erlang process message queue). *)
+(** Erlang node and mbox (equivalent of Erlang process message queue).
+
+See Enode interface for creation of Mbox.
+*)
 
 module Mbox : sig
+    
     type t
 
-    (** Create an Mbox from a PID - used by Enode helper. *)
-    val create: Eterm.e_pid -> t
-
-    (** Return name of the mbox; not None if mbox is registered*)
+    (** Return name of the mbox; None if mbox is not registered*)
     val name: t -> string option
+
+    (** Return pid term. *)
+    val pid: t -> Eterm.t
 
     (** Start a thread wich call the callback function for each incoming message. *)
     val create_activity: t -> (Eterm.t -> unit) -> unit

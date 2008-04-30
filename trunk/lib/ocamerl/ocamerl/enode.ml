@@ -13,7 +13,7 @@ module Mbox = struct
 
     let ctrl_stop = Ctrl 0
 
-    let create pid = {
+    let _create pid = {
         name = None;
         pid = pid;
         queue = Fifo.create ();
@@ -25,6 +25,9 @@ module Mbox = struct
 
     let _set_name self name =
         self.name <- Some name
+
+    let pid self =
+        Eterm.ET_pid self.pid
 
     let _new_message mbox msg =
         (* no limit on number of message. *)
@@ -48,16 +51,19 @@ module Mbox = struct
 
     let stop_activity mbox =
         let _ = Fifo.put mbox.queue ctrl_stop in
-        Trace.dbg "Enode"
-            "Mbox(%s) activity is stopping\n"
-            (Eterm.e_pid_to_string mbox.pid)
-        ;
         let _ = match mbox.activity with
         (* this may dead-lock ... *)
         | Some thr -> Thread.join thr;
         | None -> ()
         in
-        Trace.dbg "Enode" "Mbox activity is stopped\n"
+        Trace.dbg
+            "Enode"
+            "Mbox (%s%s) activity is stopped\n"
+            (Eterm.e_pid_to_string mbox.pid)
+            (match name mbox with
+            | Some name -> ", " ^ name
+            | None -> ""
+            )
 
 end (* module Mbox *)
 
@@ -70,6 +76,7 @@ module MboxManager : sig
     val register: t -> Mbox.t -> string -> unit
     val unregister: t -> Mbox.t -> unit
     val find_by_name: t -> string -> Mbox.t
+    val find_by_pid: t -> Eterm.e_pid -> Mbox.t
 end = struct
 
     type t = {
@@ -89,7 +96,7 @@ end = struct
             []
 
     let make_mbox self pid =
-        let mbox = Mbox.create pid in
+        let mbox = Mbox._create pid in
         Hashtbl.add self.pidMboxMap pid mbox;
         mbox
 
@@ -106,6 +113,9 @@ end = struct
 
     let find_by_name self name =
         Hashtbl.find self.nameMboxMap name
+
+    let find_by_pid self pid =
+        Hashtbl.find self.pidMboxMap pid
 
 end (* module MboxManager *)
 
@@ -208,15 +218,25 @@ let tag_monitor_p      = 19l
 let tag_demonitor_p    = 20l
 let tag_monitor_p_exit = 21l
 
-let _send_to_name node name msg =
+let _send_to finder msg =
     try
-        let mbox = MboxManager.find_by_name node.mboxes name in
+        let mbox = finder () in
         Mbox._new_message mbox msg
     with
         Not_found ->
-            Trace.dbg "Enode"
-                "failed to handle control message: registered name not found: %s\n"
-                name
+            Trace.inf
+                "Enode"
+                "failed to dispatch message: destination not found.\n"
+
+let _send_to_name node name msg =
+    _send_to
+        (fun () -> MboxManager.find_by_name node.mboxes name)
+        msg
+
+let _send_to_pid node pid msg =
+    _send_to
+        (fun () -> MboxManager.find_by_pid node.mboxes pid)
+        msg
 
 let _receive node ectrl arg =
     match ectrl, arg with
@@ -227,6 +247,12 @@ let _receive node ectrl arg =
         Eterm.ET_atom name;
     |], Some msg) ->
         _send_to_name node name msg
+    | (Eterm.ET_tuple [|
+        Eterm.ET_int tag_send;
+        _;
+        Eterm.ET_pid pid;
+    |], Some msg) ->
+        _send_to_pid node pid msg
     | _ ->
         Trace.dbg "Enode"
             "not implemented: ignore control message: %s\n"
@@ -237,7 +263,7 @@ let send node dest msg =
     | Eterm.ET_pid _ ->
         let ctrl = Eterm.ET_tuple [|
             Eterm.ET_int tag_send;
-            Eterm.ET_atom ""; (* TODO cookie ... *)
+            Eterm.ET_atom "cookie"; (* TODO cookie ... *)
             dest;
         |] in
         let arg = Some msg in
