@@ -177,8 +177,6 @@ type t = {
 }
 
 
-(* node management *)
-
 let create_mbox node =
     let pid = PidManager.make_pid node.pids in
     let mbox = MboxManager.make_mbox node.mboxes pid in

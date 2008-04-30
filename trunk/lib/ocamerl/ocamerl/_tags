@@ -1,3 +1,4 @@
+"handshake.ml": camlp4o
 "econn.ml": camlp4o
 "eterm.ml": camlp4o
 "epmc.ml": camlp4o
