@@ -4,6 +4,7 @@ Epmc
 Eterm
 Fifo
 Fsm
+Handshake
 Serv
 Tools
 Trace
