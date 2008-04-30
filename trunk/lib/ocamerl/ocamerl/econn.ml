@@ -1,7 +1,4 @@
-
-
-module Control = struct
-    (* TODO rename Control to ... what? Packing? *)
+module Packing = struct
     
     let tag_pass_through = 'p' (* 112 *)
 
@@ -10,15 +7,11 @@ module Control = struct
         | Msg_p of
               Eterm.t        (* control message *)
             * Eterm.t option (* optional parameter *)
-        | Msg_any of (*TODO is this really used??? *)
-              char   (* tag? *)
-            * string (* raw binary data *)
 
     let message_to_string msg = match msg with
         | Msg_tick               -> "Msg_tick"
         | Msg_p (ctrl, None)     -> Printf.sprintf "Msg_p(%s)" (Eterm.to_string ctrl)
         | Msg_p (ctrl, Some arg) -> Printf.sprintf "Msg_p(%s, %s)" (Eterm.to_string ctrl) (Eterm.to_string arg)
-        | Msg_any (tag, data)    -> Printf.sprintf "Msg_any(%c, %s)" tag data
 
     let rec message_of_stream = parser
         | [< len = Tools.eint_n 4; stream >] ->
@@ -30,29 +23,25 @@ module Control = struct
                     end
                 | _ ->
                     begin
-                    parser [< 'tag; msg = tag_parse (len - 1) tag >] ->
+                    parser [< 'tag; msg = _tag_parse (len - 1) tag >] ->
                         msg
                     end
             in
             p stream
-    and tag_parse len tag =
+    and _tag_parse len tag =
         match tag with
-            | t when t = tag_pass_through -> parse_p len
-            | _ -> parse_any tag len
-    and parse_p len =
+            | t when t = tag_pass_through -> _parse_p len
+            | _ -> failwith "unrecognize control message tag"
+    and _parse_p len =
         parser [< data = Tools.string_n len; >] ->
             let s = Stream.of_string data in
             let ctrl = Eterm.of_stream s in
-            parse_p_arg ctrl s
-    and parse_p_arg ctrl = parser
+            _parse_p_arg ctrl s
+    and _parse_p_arg ctrl = parser
         | [< arg = Eterm.of_stream; >] ->
             Msg_p (ctrl, Some arg)
         | [< >] ->
             Msg_p (ctrl, None)
-    and parse_any tag len =
-        parser [< data = Tools.string_n len >] ->
-            Msg_any (tag, data)
-
 
     let _message_to_chars msg = match msg with
         | Msg_tick ->
@@ -64,8 +53,6 @@ module Control = struct
             tag_pass_through
             :: (Eterm.to_chars ctrl)
             @  (Eterm.to_chars msg)
-        | _ ->
-            failwith ("not implemented: cannot encode message: " ^ (message_to_string msg))
 
     let pack msg =
         let chars = _message_to_chars msg in
@@ -74,7 +61,7 @@ module Control = struct
         let r = Tools.implode (head @ chars) in
         r
 
-end (* module Control *)
+end (* module Packing *)
 
 
 module Ticker = struct
@@ -168,7 +155,7 @@ module Sender = struct
           Data of string
         | Ctrl of int
 
-    let tickData = Data (Control.pack Control.Msg_tick)
+    let tickData = Data (Packing.pack Packing.Msg_tick)
 
     let create oc =
         {
@@ -233,24 +220,6 @@ module Sender = struct
 end (* module Sender *)
 
 
-let tag_link           = 1l  (* {1, FromPid, ToPid}                          *)
-let tag_send           = 2l  (* {2, Cookie, ToPid}                 + message *)
-let tag_exit           = 3l  (* {3, FromPid, ToPid, Reason}                  *)
-let tag_unlink         = 4l  (* {4, FromPid, ToPid}                          *)
-let tag_node_link      = 5l  (* {5}                                          *)
-let tag_reg_send       = 6l  (* {6, FromPid, Cookie, ToName}       + message *)
-let tag_group_leader   = 7l  (* {7, FromPid, ToPid}                          *)
-let tag_exit2          = 8l  (* {8, FromPid, ToPid, Reason}                  *)
-let tag_send_tt        = 12l (* {12, Cookie, ToPid, TraceToken}    + message *)
-let tag_exit_tt        = 13l (* {13, FromPid, ToPid, TraceToken, Reason}     *) 
-let tag_reg_send_tt    = 16l (* {16, FromPid, Cookie, ToName, TraceToken}    *)
-let tag_exit2_tt       = 18l (* {18, FromPid, ToPid, TraceToken, Reason}     *)
-(* shall not be used (only for Erlang node, not hidden node) *)
-let tag_monitor_p      = 19l
-let tag_demonitor_p    = 20l
-let tag_monitor_p_exit = 21l
-
-
 module Connection = struct
 
     type t = {
@@ -261,18 +230,13 @@ module Connection = struct
         sender = sender;
     }
 
-    let send_to_pid conn toPid msg =
-        let dest = Eterm.ET_tuple [|
-            Eterm.ET_int tag_send;
-            Eterm.ET_atom ""; (* TODO cookie ... *)
-            toPid;
-        |] in
-        let msg = Control.Msg_p (dest, Some msg) in
+    let send conn ctrl arg =
+        let msg = Packing.Msg_p (ctrl, arg) in
         Trace.dbg "Econn"
             "Sending control message: %s\n"
-            (Control.message_to_string msg);
+            (Packing.message_to_string msg);
         Trace.flush ();
-        let bin = Control.pack msg in
+        let bin = Packing.pack msg in
         Sender.send conn.sender bin
 
 end (* module Connection *)
@@ -294,27 +258,29 @@ module ConnManager = struct
 end (* module ConnManager *)
 
 
+type connCB_t = string -> Connection.t -> unit
+
+type controlCB_t = Eterm.t -> Eterm.t option -> unit
+
 type t = {
     (* incoming connection (server) *)
     addr: Unix.inet_addr;
     port: int;
     sock: Unix.file_descr;
-    loop: connCB -> inMsgCB -> unit; (* TODO remove! *)
     mutable thread: Thread.t option;
     (* alive connections *)
     connections: ConnManager.t;
 }
-and handler_state = {
+
+type handler_state_t = {
     (*TODO most of this is node properties ... *)
     nodeName: string;
     cookie: string;
     flags: Int32.t;
     tickTime: float;
-    connectionUpCB: connCB; (*TODO can disapear ... be replace by direct call to the ConnManager *)
-    incomingMessageCB: inMsgCB;
+    connectionUpCB: connCB_t; (*TODO can disapear ... be replace by direct call to the ConnManager *)
+    controlCB: controlCB_t;
 }
-and connCB = string -> Connection.t -> unit
-and inMsgCB = Eterm.t -> Eterm.t -> unit
 
 
 let distr_version = 5
@@ -322,15 +288,14 @@ let distr_version = 5
 
 let listen_port self = self.port
 
-let send_to_pid self toPid msg =
-    let peerName = Eterm.et_pid_node_name toPid in
+let send self name ctrl arg =
     try
-        let conn = ConnManager.get self.connections peerName in
-        Connection.send_to_pid conn toPid msg
+        let conn = ConnManager.get self.connections name in
+        Connection.send conn ctrl arg
     with
         Not_found ->
             (* TODO try to establish the connection *)
-            failwith "Cannot send message to pid: connection not found"
+            failwith "Cannot send message: connection not found"
 
 let _handshake st istream sender =
     let _do_actions sender actions = List.iter
@@ -375,7 +340,7 @@ let _handshake st istream sender =
 
 let rec _control state istream sender =
     let msg = try
-        Control.message_of_stream istream
+        Packing.message_of_stream istream
     with
         Stream.Failure ->
             let data = Stream.npeek 256 istream in
@@ -385,41 +350,19 @@ let rec _control state istream sender =
                 (Tools.dump_hex buf "<<" ">>" ",")
             ;
             Trace.flush ();
-            failwith "Control message stream failure"
+            failwith "Packing message stream failure"
     in
     let _ = match msg with
-        | Control.Msg_tick ->
-            Trace.dbg "Econn" "Received tick control message\n"
-            (* TODO check that peer continue to tick
-            and else set connection down *)
-        | Control.Msg_p (ectrl, arg) ->
-            Trace.dbg "Econn"
-                "Received control message: %s\n"
-                (Control.message_to_string msg)
-            ;
-            (match ectrl, arg with
-            | (Eterm.ET_tuple [|
-                Eterm.ET_int tag_reg_send;
-                _;
-                _;
-                dest;
-            |], Some a) ->
-                begin
-                try
-                    state.incomingMessageCB dest a
-                with
-                    exn ->
-                        Trace.dbg "Econn"
-                            "Incoming message not handled: %s\n"
-                            (Printexc.to_string exn)
-                end
-            | _ ->
-                Trace.dbg "Econn"
-                    "not implemented: ignore control message: %s\n"
-                    (Control.message_to_string msg)
-            )
-        | Control.Msg_any (tag, data) ->
-            Trace.dbg "Econn" "Ignoring unknow control message\n"
+    | Packing.Msg_tick ->
+        Trace.dbg "Econn" "Received tick control message\n"
+        (* TODO check that peer continue to tick
+        and else set connection down *)
+    | Packing.Msg_p (ectrl, arg) ->
+        Trace.dbg "Econn"
+            "Received control message: %s\n"
+            (Packing.message_to_string msg)
+        ;
+        state.controlCB ectrl arg
     in
     Trace.flush ();
     _control state istream sender
@@ -462,50 +405,44 @@ let _handler state id fd =
             Unix.close fd
 
 
-let create nodeName cookie =
+let create () =
     (* TODO server shall be in some sub module *)
     let sock = Serv.listen 0 in
     let addr, port = Serv.inet_addr sock in
     Trace.dbg "Econn"
-        "Node server listening on port %i (node '%s')\n"
+        "Node server listening on port %i\n"
         port
-        nodeName
     ;
-    Trace.flush ();
-    let handler connUpCB incomingMessageCB =
-        Serv.handle_in_thread ( Serv.trace_handler ( Serv.make_handler (
-            _handler {
-                    flags = (Int32.logor 4l 256l); (* TODO set correct flags *)
-                    cookie = cookie;
-                    nodeName = nodeName;
-                    tickTime = 10.0; (*TODO which value? *)
-                    connectionUpCB = connUpCB;
-                    incomingMessageCB = incomingMessageCB;
-            }
-        )))
-    in
-    let server connUpCB incomingMessageCB =
-        try
-            Serv.accept_loop 0 sock (handler connUpCB incomingMessageCB)
-        with
-            exn ->
-                Trace.inf "Econn" "Exception in server (may be stopping)\n"
-    in
     {
         addr = addr;
         port = port;
         sock = sock;
-        loop = server; (* TODO no need to keep in record! *)
         thread = None;
         connections = ConnManager.create ();
     }
 
-let start self incomingMessageCB =
+let start self name cookie controlCB =
     let connectionUpCB = ConnManager.connection_up self.connections in
-    let thr = Thread.create
-        (fun () -> self.loop connectionUpCB incomingMessageCB)
-        ()
+    let handler controlCB =
+        Serv.handle_in_thread ( Serv.trace_handler ( Serv.make_handler (
+            _handler {
+                    flags = (Int32.logor 4l 256l); (* TODO set correct flags *)
+                    cookie = cookie;
+                    nodeName = name;
+                    tickTime = 10.0; (*TODO which value? *)
+                    connectionUpCB = connectionUpCB;
+                    controlCB = controlCB;
+            }
+        )))
     in
+    let server controlCB =
+        try
+            Serv.accept_loop 0 self.sock (handler controlCB)
+        with
+            exn ->
+                Trace.inf "Econn" "Exception in server (may be stopping)\n"
+    in
+    let thr = Thread.create server controlCB in
     self.thread <- Some thr
 
 let stop server =

@@ -170,12 +170,15 @@ end (* module PidManager *)
 
 type t = {
     name: string;
+    cookie: string;
     epmc: Epmc.t;
     connections: Econn.t;
     pids: PidManager.t;
     mboxes: MboxManager.t;
 }
 
+
+(* MBoxes. *)
 
 let create_mbox node =
     let pid = PidManager.make_pid node.pids in
@@ -186,28 +189,66 @@ let register_mbox node mbox name =
     MboxManager.register node.mboxes mbox name
 
 
+(* Node in/out messages dispatch. *)
+
+let tag_link           = 1l  (* {1, FromPid, ToPid}                          *)
+let tag_send           = 2l  (* {2, Cookie, ToPid}                 + message *)
+let tag_exit           = 3l  (* {3, FromPid, ToPid, Reason}                  *)
+let tag_unlink         = 4l  (* {4, FromPid, ToPid}                          *)
+let tag_node_link      = 5l  (* {5}                                          *)
+let tag_reg_send       = 6l  (* {6, FromPid, Cookie, ToName}       + message *)
+let tag_group_leader   = 7l  (* {7, FromPid, ToPid}                          *)
+let tag_exit2          = 8l  (* {8, FromPid, ToPid, Reason}                  *)
+let tag_send_tt        = 12l (* {12, Cookie, ToPid, TraceToken}    + message *)
+let tag_exit_tt        = 13l (* {13, FromPid, ToPid, TraceToken, Reason}     *) 
+let tag_reg_send_tt    = 16l (* {16, FromPid, Cookie, ToName, TraceToken}    *)
+let tag_exit2_tt       = 18l (* {18, FromPid, ToPid, TraceToken, Reason}     *)
+(* shall not be used (only for Erlang node, not hidden node) *)
+let tag_monitor_p      = 19l
+let tag_demonitor_p    = 20l
+let tag_monitor_p_exit = 21l
+
+let _send_to_name node name msg =
+    try
+        let mbox = MboxManager.find_by_name node.mboxes name in
+        Mbox._new_message mbox msg
+    with
+        Not_found ->
+            Trace.dbg "Enode"
+                "failed to handle control message: registered name not found: %s\n"
+                name
+
+let _receive node ectrl arg =
+    match ectrl, arg with
+    | (Eterm.ET_tuple [|
+        Eterm.ET_int tag_reg_send;
+        _;
+        _;
+        Eterm.ET_atom name;
+    |], Some msg) ->
+        _send_to_name node name msg
+    | _ ->
+        Trace.dbg "Enode"
+            "not implemented: ignore control message: %s\n"
+            (Eterm.to_string ectrl)
+
 let send node dest msg =
     match dest with
     | Eterm.ET_pid _ ->
-        Econn.send_to_pid node.connections dest msg
+        let ctrl = Eterm.ET_tuple [|
+            Eterm.ET_int tag_send;
+            Eterm.ET_atom ""; (* TODO cookie ... *)
+            dest;
+        |] in
+        let arg = Some msg in
+        let name = Eterm.et_pid_node_name dest in
+        Econn.send node.connections name ctrl arg
     | _ ->
         failwith "Enode.send: dest is not valid"
 
-let _receive node dest msg =
-    (* dispatch message to the appropriate mbox *)
-    match dest with
-    | Eterm.ET_atom name ->
-        begin
-        try
-            let mbox = MboxManager.find_by_name node.mboxes name in
-            Mbox._new_message mbox msg
-        with
-            Not_found ->
-                failwith ("dest not found: " ^ name)
-        end
-    | _ ->
-        (* TODO receive message adressed to direct pid *)
-        failwith ("not implemented: cannot receive message where dest is: " ^ (Eterm.to_string dest))
+
+
+(* Internal node state. *)
 
 let _create_net_kernel node =
     let mbox = create_mbox node in
@@ -246,7 +287,10 @@ let _publish node =
 let _unpublish node =
     let _ = Epmc.disconnect node.epmc in
     PidManager.reset node.pids
-    
+
+
+(* Construction and connectivity. *)
+
 let create ?(cookie="") nodeName =
     let name =
         if String.contains nodeName '@'
@@ -255,11 +299,12 @@ let create ?(cookie="") nodeName =
     in
     Trace.inf "Enode" "Making node '%s'\n" name;
     let epmc = Epmc.create () in
-    let connections = Econn.create name cookie in
+    let connections = Econn.create () in
     let pids = PidManager.create name in
     let mboxes = MboxManager.create () in
     {
         name = name;
+        cookie = cookie;
         epmc = epmc;
         connections = connections;
         pids = pids;
@@ -269,7 +314,7 @@ let create ?(cookie="") nodeName =
 let start node =
     let _ = _publish node in (* may fail *)
     let _ = _create_net_kernel node in
-    Econn.start node.connections (_receive node)
+    Econn.start node.connections node.name node.cookie (_receive node)
 
 let stop node =
     Trace.dbg "Enode" "Node '%s' is stopping\n" node.name;
