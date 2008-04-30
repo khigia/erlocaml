@@ -173,23 +173,22 @@ module Sender = struct
     let send sender data =
         let _ = Fifo.put sender.queue (Data data) in
         match sender.ticker with
-            | Some ticker ->
-                Ticker.update_activity ticker
-            | _ -> ()
+        | Some ticker -> Ticker.update_activity ticker
+        | _ -> ()
 
     let start sender =
         let rec _loop () =
             let msg = Fifo.get sender.queue in
             match msg with
-                | Data data ->
-                    Trace.dbg "Econn" "Sender sent one packet\n";
-                    Trace.flush ();
-                    output_string sender.ochannel data;
-                    flush sender.ochannel;
-                    _loop ()
-                | Ctrl code ->
-                    (* any control message stop the loop *)
-                    Trace.dbg "Econn" "Sender is stopping\n"
+            | Data data ->
+                Trace.dbg "Econn" "Sender sent one packet\n";
+                Trace.flush ();
+                output_string sender.ochannel data;
+                flush sender.ochannel;
+                _loop ()
+            | Ctrl code ->
+                (* any control message stop the loop *)
+                Trace.dbg "Econn" "Sender is stopping\n"
         in
         let thr = Thread.create _loop () in
         sender.thread <- Some thr;
@@ -197,17 +196,17 @@ module Sender = struct
 
     let stop sender =
         let _ = match sender.ticker with
-            | Some ticker ->
-                Ticker.stop ticker
-            | None ->
-                ()
+        | Some ticker ->
+            Ticker.stop ticker
+        | None ->
+            ()
         in
         match sender.thread with
-            | Some thr ->
-                Fifo.put sender.queue (Ctrl 0);
-                Thread.join thr
-            | None ->
-                ()
+        | Some thr ->
+            Fifo.put sender.queue (Ctrl 0);
+            Thread.join thr
+        | None ->
+            ()
 
 
     let start_ticker sender tickTime =
@@ -258,65 +257,52 @@ module ConnManager = struct
 end (* module ConnManager *)
 
 
-type connCB_t = string -> Connection.t -> unit
+module Server = struct
+    (* Incoming connection handler. *)
 
-type controlCB_t = Eterm.t -> Eterm.t option -> unit
+    type t = {
+        addr: Unix.inet_addr;
+        port: int;
+        sock: Unix.file_descr;
+        mutable thread: Thread.t option;
+    }
 
-type t = {
-    (* incoming connection (server) *)
-    addr: Unix.inet_addr;
-    port: int;
-    sock: Unix.file_descr;
-    mutable thread: Thread.t option;
-    (* alive connections *)
-    connections: ConnManager.t;
-}
+    type handler_state_t = {
+        nodeName: string;
+        cookie: string;
+        flags: Int32.t;
+        tickTime: float;
+        connectionUpCB: string -> Connection.t -> unit;
+        controlCB: Eterm.t -> Eterm.t option -> unit;
+    }
 
-type handler_state_t = {
-    (*TODO most of this is node properties ... *)
-    nodeName: string;
-    cookie: string;
-    flags: Int32.t;
-    tickTime: float;
-    connectionUpCB: connCB_t; (*TODO can disapear ... be replace by direct call to the ConnManager *)
-    controlCB: controlCB_t;
-}
+    
+    let distr_version = 5
 
 
-let distr_version = 5
-
-
-let listen_port self = self.port
-
-let send self name ctrl arg =
-    try
-        let conn = ConnManager.get self.connections name in
-        Connection.send conn ctrl arg
-    with
-        Not_found ->
-            (* TODO try to establish the connection *)
-            failwith "Cannot send message: connection not found"
-
-let _handshake st istream sender =
-    let _do_actions sender actions = List.iter
-        (fun msg ->
-            let bin = Handshake.pack msg in
-            Sender.send sender bin
-        )
-        actions
-    in
-    let rec _loop fsm istream sender =
-        let msg = try
-            Handshake.message_of_stream istream
-        with
-            Stream.Failure ->
-                failwith "Handshake stream failure"
+    let _handshake st istream sender =
+        let _get_message istream =
+            let msg = try
+                Handshake.message_of_stream istream
+            with
+                Stream.Failure ->
+                    failwith "Handshake stream failure"
+            in
+            Trace.dbg "Econn"
+                "Received handshake message: %s\n"
+                (Handshake.message_to_string msg);
+            msg
         in
-        Trace.dbg "Econn"
-            "Received handshake message: %s\n"
-            (Handshake.message_to_string msg)
-        ;
-        match Fsm.send fsm msg with
+        let _do_actions sender actions = List.iter
+            (fun msg ->
+                let bin = Handshake.pack msg in
+                Sender.send sender bin
+            )
+            actions
+        in
+        let rec _loop fsm istream sender =
+            let msg = _get_message istream in
+            match Fsm.send fsm msg with
             | Fsm.Reply(Some result, actions) ->
                 _do_actions sender actions;
                 Trace.flush ();
@@ -328,59 +314,51 @@ let _handshake st istream sender =
             | Fsm.Finish ->
                 Trace.flush ();
                 (false, None)
-    in
-    let fsm = Handshake.create_fsm
-        distr_version (*TODO value come from where? ... *)
-        st.nodeName
-        st.cookie
-        st.flags
-    in
-    _loop fsm istream sender
+        in
+        let fsm = Handshake.create_fsm
+            distr_version
+            st.nodeName
+            st.cookie
+            st.flags
+        in
+        _loop fsm istream sender
 
-
-let rec _control state istream sender =
-    let msg = try
-        Packing.message_of_stream istream
-    with
-        Stream.Failure ->
-            let data = Stream.npeek 256 istream in
-            let buf = Tools.implode data in
+    let rec _control state istream sender =
+        let msg = try
+            Packing.message_of_stream istream
+        with
+            Stream.Failure ->
+                failwith "Control stream failure"
+        in
+        let _ = match msg with
+        | Packing.Msg_tick ->
+            Trace.dbg "Econn" "Received tick control message\n"
+            (* TODO check that peer continue to tick
+            and else set connection down *)
+        | Packing.Msg_p (ectrl, arg) ->
             Trace.dbg "Econn"
-                "Dump of stream: %s\n"
-                (Tools.dump_hex buf "<<" ">>" ",")
+                "Received control message: %s\n"
+                (Packing.message_to_string msg)
             ;
-            Trace.flush ();
-            failwith "Packing message stream failure"
-    in
-    let _ = match msg with
-    | Packing.Msg_tick ->
-        Trace.dbg "Econn" "Received tick control message\n"
-        (* TODO check that peer continue to tick
-        and else set connection down *)
-    | Packing.Msg_p (ectrl, arg) ->
-        Trace.dbg "Econn"
-            "Received control message: %s\n"
-            (Packing.message_to_string msg)
-        ;
-        state.controlCB ectrl arg
-    in
-    Trace.flush ();
-    _control state istream sender
+            state.controlCB ectrl arg
+        in
+        Trace.flush ();
+        _control state istream sender
 
-
-let _handler state id fd =
-    Random.self_init ();
-    let ic = Unix.in_channel_of_descr fd in
-    let oc = Unix.out_channel_of_descr fd in
-    let istream = Stream.of_channel ic in
-    (* sender is responsible of output connection *)
-    let sender = Sender.create oc in
-    let _senderThread = Sender.start sender in
-    (* first: do the handshake *)
-    match _handshake state istream sender with
+    let _handler state id fd =
+        Random.self_init ();
+        let ic = Unix.in_channel_of_descr fd in
+        let oc = Unix.out_channel_of_descr fd in
+        let istream = Stream.of_channel ic in
+        (* sender is responsible of output connection *)
+        let sender = Sender.create oc in
+        let _senderThread = Sender.start sender in
+        (* first: do the handshake *)
+        begin
+        match _handshake state istream sender with
         | (true, Some peerName) ->
             Trace.dbg "Econn" "Handshake OK\n";
-            (* register the connection in node *)
+            (* register the connection *)
             state.connectionUpCB
                 peerName
                 (Connection.create sender)
@@ -396,61 +374,99 @@ let _handler state id fd =
                         "error in control loop: %s\n"
                         (Printexc.to_string exn)
             in
-            (*TODO register connection down in node *)
-            Sender.stop sender;
-            Trace.dbg "Econn" "End of connection\n";
-            Trace.flush ();
+            (*TODO register connection down *)
+            Sender.stop sender
         | _ ->
-            Trace.inf "Econn" "Close connection comming from unauthorized node\n";
-            Unix.close fd
+            Trace.inf "Econn" "Close connection comming from unauthorized node\n"
+        end;
+        Trace.dbg "Econn" "End of connection\n"
+        (*Unix.close fd*)
+
+    let port self =
+        self.port
+
+    let create () =
+        let sock = Serv.listen 0 in
+        let addr, port = Serv.inet_addr sock in
+        Trace.dbg "Econn"
+            "Node server listening on port %i\n"
+            port
+        ;
+        {
+            addr = addr;
+            port = port;
+            sock = sock;
+            thread = None;
+        }
+
+    let start self name cookie connUpCB controlCB =
+        let handler controlCB =
+            Serv.handle_in_thread ( Serv.trace_handler ( Serv.make_handler (
+                _handler {
+                        flags = (Int32.logor 4l 256l); (* TODO set correct flags *)
+                        cookie = cookie;
+                        nodeName = name;
+                        tickTime = 10.0; (*TODO which value? *)
+                        connectionUpCB = connUpCB;
+                        controlCB = controlCB;
+                }
+            )))
+        in
+        let server controlCB =
+            try
+                Serv.accept_loop 0 self.sock (handler controlCB)
+            with
+                exn ->
+                    Trace.inf "Econn" "Exception in server (may be stopping)\n"
+        in
+        let thr = Thread.create server controlCB in
+        self.thread <- Some thr
+
+    let stop self = 
+        let _ = Unix.shutdown self.sock Unix.SHUTDOWN_ALL in
+        match self.thread with
+        | Some thr ->
+            Thread.join thr;
+            self.thread <- None
+        | None ->
+            ()
+
+end (* module Server *)
 
 
-let create () =
-    (* TODO server shall be in some sub module *)
-    let sock = Serv.listen 0 in
-    let addr, port = Serv.inet_addr sock in
-    Trace.dbg "Econn"
-        "Node server listening on port %i\n"
-        port
-    ;
-    {
-        addr = addr;
-        port = port;
-        sock = sock;
-        thread = None;
-        connections = ConnManager.create ();
-    }
+type t = {
+    server: Server.t;
+    connections: ConnManager.t;
+}
+
+
+let listen_port self = Server.port self.server
+
+let send self name ctrl arg =
+    try
+        let conn = ConnManager.get self.connections name in
+        Connection.send conn ctrl arg
+    with
+        Not_found ->
+            (* TODO try to establish the connection *)
+            failwith "Cannot send message: connection not found"
+
+let create () = {
+    server = Server.create ();
+    connections = ConnManager.create ();
+}
 
 let start self name cookie controlCB =
     let connectionUpCB = ConnManager.connection_up self.connections in
-    let handler controlCB =
-        Serv.handle_in_thread ( Serv.trace_handler ( Serv.make_handler (
-            _handler {
-                    flags = (Int32.logor 4l 256l); (* TODO set correct flags *)
-                    cookie = cookie;
-                    nodeName = name;
-                    tickTime = 10.0; (*TODO which value? *)
-                    connectionUpCB = connectionUpCB;
-                    controlCB = controlCB;
-            }
-        )))
-    in
-    let server controlCB =
-        try
-            Serv.accept_loop 0 self.sock (handler controlCB)
-        with
-            exn ->
-                Trace.inf "Econn" "Exception in server (may be stopping)\n"
-    in
-    let thr = Thread.create server controlCB in
-    self.thread <- Some thr
+    Server.start
+        self.server
+        name
+        cookie
+        connectionUpCB
+        controlCB
 
-let stop server =
-    Trace.dbg "Econn" "Node server is stopping\n";
+let stop self =
+    Trace.dbg "Econn" "Node connections are stopping\n";
+    Server.stop self.server;
     Trace.todo "Econn" "connections must be stop/unregistered\n";
-    let _ = Unix.shutdown server.sock Unix.SHUTDOWN_ALL in
-    let _ = match server.thread with
-        | Some thr -> Thread.join thr
-        | None -> ()
-    in
     Trace.inf "Econn" "Node server stopped\n"

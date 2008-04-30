@@ -8,7 +8,8 @@ Build/Distrib:
     * what about a common lib (mainly eterm) usable for F#
 
 Test:
-    * lot of mli/doc/unit-tests are missing
+    * generic node_mult (like node_double, but allow config of operand:
+      intend is to build mbox online and test a bit of concurrency).
 
 Logging:
     * pa_log http://www.cs.nyu.edu/~cconway/tools/index.html
