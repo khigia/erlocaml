@@ -7,13 +7,21 @@ EX_BYTE   =${EX_SOURCES:.ml=.byte}
 
 OCAMLBUILD=ocamlbuild -classic-display
 
+NAME=ocamerl
+ARCHIVE=ocamerl.cma
+XARCHIVE=ocamerl.cmxa
+
+LIB_TARGETS=\
+    $(ARCHIVE) \
+    ocamerl/ocamerl.docdir/index.html
+
 TARGETS=\
-    ocamerl.cma \
-    ocamerl/ocamerl.docdir/index.html \
-    ${EX_BYTE}
+	$(LIB_TARGETS) \
+    $(EX_BYTE)
 
 TEST_TARGETS=\
-	$(TARGETS) \
+	$(LIB_TARGETS) \
+    $(EX_BYTE) \
     $(TEST_BYTE)
 
 
@@ -31,6 +39,16 @@ dev: dev_build utest test
 .PHONY: dev_build
 dev_build: generated
 	$(OCAMLBUILD) $(TEST_TARGETS)
+
+
+.PHONY: install uninstall
+install: main_build
+	ocamlfind install $(NAME) META _build/$(NAME)/*.mli _build/$(NAME)/*.cmi _build/$(NAME).cmi _build/$(ARCHIVE) $$extra
+
+#{ test ! -f $(XARCHIVE) || extra="$(XARCHIVE) "`basename $(XARCHIVE) .cmxa`.a }; \
+
+uninstall:
+	ocamlfind remove $(NAME)
 
 
 .PHONY: clean
