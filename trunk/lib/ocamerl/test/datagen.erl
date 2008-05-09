@@ -6,6 +6,7 @@ data_set() -> [
     {3.14,       "ET_float 3.14"},
     {bea,        "ET_atom \"bea\""},
     {true,       "ET_bool true"},
+    {<<"test">>, "ET_bin [|'t'; 'e'; 's'; 't';|]"},
     {{true, 42}, "ET_tuple [| ET_bool true; ET_int 42l; |]"},
     {"bea",      "ET_string \"bea\""},
     {[true, 42], "ET_list [ ET_bool true; ET_int 42l; ]"},

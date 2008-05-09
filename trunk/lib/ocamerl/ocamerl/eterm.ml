@@ -10,6 +10,7 @@ let magic_large_tuple   = '\105'
 let magic_nil           = '\106'
 let magic_string        = '\107'
 let magic_list          = '\108'
+let magic_binary        = '\109'
 let magic_new_reference = '\114'
 
 
@@ -20,8 +21,9 @@ type t =
     | ET_float  of float
     | ET_atom   of string
     | ET_bool   of bool
-    | ET_tuple  of t array
     | ET_string of string
+    | ET_bin    of char array
+    | ET_tuple  of t array
     | ET_list   of t list
     | ET_improper_list of t list * t
     | ET_pid    of e_pid
@@ -60,6 +62,8 @@ let rec to_string t = match t with
     | ET_float n -> string_of_float n
     | ET_atom a  -> a
     | ET_bool b  -> string_of_bool b
+    | ET_bin arr ->
+        Array.fold_left (fun s e -> s ^ (String.make 1 e) ^ ",") "<<" arr ^ ">>"
     | ET_tuple arr ->
         Array.fold_left (fun s e -> s ^ (to_string e) ^ ",") "{" arr ^ "}"
     | ET_string s -> "\"" ^ s ^ "\""
@@ -79,7 +83,7 @@ let rec to_string t = match t with
             )
             creation
 
-(* TODO can probably be optimized ... *)
+(* TODO can probably be optimized ... at least look at buffer! *)
 let rec _to_chars t = match t with
     | ET_int n when n < 256l ->
         magic_small_int :: [char_of_int (Int32.to_int n)]
@@ -108,6 +112,10 @@ let rec _to_chars t = match t with
         magic_string
         :: (Tools.chars_of_int (String.length s) 2)
         @ (Tools.explode s)
+    | ET_bin b ->
+        magic_binary
+        :: (Tools.chars_of_int (Array.length b) 4)
+        @ (Array.to_list b) (* TODO must be better to do than array to list to string ;) *)
     | ET_list l ->
         magic_list
         :: (Tools.chars_of_int (List.length l) 4)
@@ -173,8 +181,9 @@ and magic_parse tag =
         | n when n = magic_nil     -> parse_nil
         | n when n = magic_string  -> parse_string
         | n when n = magic_list    -> parse_list
-        (* TODO small bin *)
-        (* TODO large bin *)
+        | n when n = magic_binary    -> parse_binary
+        (* TODO small big *)
+        (* TODO large big *)
         (* TODO new cache *)
         (* TODO cached atom *)
         (* TODO fun *)
@@ -213,6 +222,10 @@ and parse_large_tuple =
 and parse_string =
     parser [< n = Tools.eint_n 2; data = Tools.string_n n >] ->
         ET_string data
+
+and parse_binary =
+    parser [< n = Tools.eint_n 4; data = Tools.next_n n >] ->
+        ET_bin (Array.of_list data)
 
 and parse_nil =
     parser [< >] ->

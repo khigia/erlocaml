@@ -38,12 +38,12 @@ let doit () =
         let cookie = ref "" in
         Arg.parse
             [
-                ("-cookie", Arg.String (fun v -> cookie := v), "erlang node cookie");
-                ("-name", Arg.String (fun v -> name := v), "erlang node name");
+                ("-cookie", Arg.String ((:=) cookie), "erlang node cookie");
+                ("-name", Arg.String ((:=) name), "erlang node name");
             ]
             ignore
             "";
-        Trace.inf "Node_double" "name: %s; cookie: %s\n" !name !cookie;
+        Trace.dbg "Node_double" "name: %s; cookie: %s\n" !name !cookie;
         let n = Enode.create !name ~cookie:!cookie in
         let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in
         let _ = Enode.start n in

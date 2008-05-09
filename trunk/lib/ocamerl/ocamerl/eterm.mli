@@ -8,8 +8,9 @@ type t =
   | ET_float of float
   | ET_atom of string
   | ET_bool of bool
-  | ET_tuple of t array
   | ET_string of string
+  | ET_bin of char array
+  | ET_tuple of t array
   | ET_list of t list
   | ET_improper_list of t list * t (** Internal use only. *)
   | ET_pid of e_pid
