@@ -2,19 +2,21 @@
 
 EXIT=0
 OCAML_NODE_NAME=ocaml
+ERLANG_NODE_NAME=erl
+NODE_COOKIE=cookie
 
 # start erlang first (ensure epmd is running)
 echo; echo "Test $0: Run and stop an erlang node to ensure epmd is running."
-erl -sname erl_test -setcookie cookie -noshell -s init stop
+erl -sname $ERLANG_NODE_NAME -setcookie cookie -noshell -s init stop
 
 echo; echo "Test $0: Run the ocaml server."
 # TODO hard coded cookie "cookie" :(
-./ex_node_mult.byte $OCAML_NODE_NAME &
+./ex_node_mult.byte -name $OCAML_NODE_NAME -cookie $NODE_COOKIE &
 OCAML_PID=$!
 sleep 0.5
 
 echo; echo "Test $0: Run erlang node to interact with ocaml node."
-erl -sname erl_test -setcookie cookie -noshell -eval "
+erl -sname $ERLANG_NODE_NAME -setcookie $NODE_COOKIE -noshell -eval "
     OcamlNode = list_to_atom(\"$OCAML_NODE_NAME@\" ++ net_adm:localhost()),
     pong = net_adm:ping(OcamlNode),
     
