@@ -1,0 +1,6 @@
+name = "ocamerl"
+version = "0.0.1"
+description = "An distributed Erlang node in Ocaml (kind of ml_interface)."
+requires = "unix"
+archive(byte) = "ocamerl.cma"
+archive(native) = "ocamerl.cmxa"
