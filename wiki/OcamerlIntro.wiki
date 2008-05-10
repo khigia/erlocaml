@@ -19,4 +19,10 @@ Require:
   * [http://www.xs4all.nl/~mmzeeman/ocaml OUnit 1.0.2] (optional)
 
 Known to run on:
-  * GNU/Linux Ubuntu 7.10
+  * GNU/Linux Ubuntu 7.10, 8.04
+
+
+= Examples =
+  * the ex folder contains few ocaml node examples; those are used by shell script in test folder.
+  * some info can be found [http://khigia.wordpress.com/category/erlocaml on this blog]
+  * [http://github.com/khigia/eocarve/tree/master eocarve] is a project using ocamerl to interface a seamcarving library
