@@ -43,7 +43,7 @@ dev_build: generated
 
 
 .PHONY: install uninstall
-install: main_build
+install: uninstall main_build
 	test ! -f _build/$(XARCHIVE) || extra="_build/$(XARCHIVE) _build/"`basename $(XARCHIVE) .cmxa`".a" ; \
 	ocamlfind install $(NAME) META _build/$(NAME)/*.mli _build/$(NAME)/*.cmi _build/$(NAME).cmi _build/$(ARCHIVE) $$extra
 
@@ -62,7 +62,7 @@ clean:
 .PHONY: test
 # no rule dependency ... rule used as a function
 test:
-	@for i in ${TEST_SHELL} ; do echo -n "Running '$$i': " ; $$i > /dev/null ; r=$$? && echo "$$r" ; done
+	@for i in ${TEST_SHELL} ; do echo -n "Running '$$i': " ; $$i > /dev/null 2>&1; r=$$? && echo "$$r" ; done
 
 .PHONY: utest
 # no rule dependency ... rule used as a function

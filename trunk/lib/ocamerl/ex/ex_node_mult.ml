@@ -33,17 +33,17 @@ let create_main_process node name =
 
 let doit () =
     try
-        Trace.inf "Node_double" "Creating node\n";
         let name = ref "ocaml" in
         let cookie = ref "" in
         Arg.parse
             [
                 ("-cookie", Arg.String ((:=) cookie), "erlang node cookie");
                 ("-name", Arg.String ((:=) name), "erlang node name");
+                ("-debug", Arg.Unit (fun () -> Trace.set_level Trace.lvl_debug), "print debug messages");
             ]
             ignore
             "";
-        Trace.dbg "Node_double" "name: %s; cookie: %s\n" !name !cookie;
+        Trace.inf "Node_double" "Creating node; name: %s; cookie: %s\n" !name !cookie;
         let n = Enode.create !name ~cookie:!cookie in
         let _ = Thread.sigmask Unix.SIG_BLOCK [Sys.sigint] in
         let _ = Enode.start n in

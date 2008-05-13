@@ -37,17 +37,21 @@ module Mbox = struct
         Fifo.get mbox.queue
 
     let create_activity mbox recvCB =
-        let rec recv_loop = fun () ->
-            let elt = _receive mbox in
-            match elt with
-            | Data msg ->
-                recvCB msg;
-                recv_loop ()
-            | ctrl_stop ->
-                ()
-        in
-        let thr = Thread.create recv_loop () in
-        mbox.activity <- Some thr
+        match mbox.activity with
+        | Some t ->
+            failwith "activity alreeady exists (see stop_activity)."
+        | None ->
+            let rec recv_loop = fun () ->
+                let elt = _receive mbox in
+                match elt with
+                | Data msg ->
+                    recvCB msg;
+                    recv_loop ()
+                | ctrl_stop ->
+                    ()
+            in
+            let thr = Thread.create recv_loop () in
+            mbox.activity <- Some thr
 
     let stop_activity mbox =
         let _ = Fifo.put mbox.queue ctrl_stop in
@@ -63,7 +67,8 @@ module Mbox = struct
             (match name mbox with
             | Some name -> ", " ^ name
             | None -> ""
-            )
+            );
+        mbox.activity <- None
 
 end (* module Mbox *)
 
@@ -341,6 +346,11 @@ let start node =
     let _ = _publish node in (* may fail *)
     let _ = _create_net_kernel node in
     Econn.start node.connections node.name node.cookie (_receive node)
+
+let run ?(cookie="") nodeName =
+    let n = create nodeName ~cookie:cookie in
+    start n;
+    n
 
 let stop node =
     Trace.dbg "Enode" "Node '%s' is stopping\n" node.name;

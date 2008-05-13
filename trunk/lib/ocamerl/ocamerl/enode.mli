@@ -37,5 +37,8 @@ val create: ?cookie:string -> string -> t
 (** Start the node: register it, start kernel processing, and listen for connections. *)
 val start: t -> unit
 
+(** [Enode.run name ~cookie:cookie] Create a node named [name] with cookie [cookie] and start it. *)
+val run: ?cookie:string -> string -> t
+
 (** Stop the node. *)
 val stop: t -> unit
