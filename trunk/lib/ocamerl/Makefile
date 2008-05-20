@@ -2,8 +2,9 @@ TEST_SOURCES=${wildcard test/*Test.ml}
 TEST_BYTE   =${TEST_SOURCES:.ml=.byte}
 TEST_SHELL  =${wildcard test/*.sh}
 
-EX_SOURCES=${wildcard ex/*.ml}
-EX_BYTE   =${EX_SOURCES:.ml=.byte}
+EX_ML_SOURCES=${wildcard ex/*.ml}
+EX_BYTE   =${EX_ML_SOURCES:.ml=.byte}
+EX_BEAM   =$(patsubst ex/%.erl,beam/%.beam,$(wildcard ex/*.erl))
 
 OCAMLBUILD=ocamlbuild -classic-display
 
@@ -30,7 +31,7 @@ TEST_TARGETS=\
 main: main_build test
 
 .PHONY: main_build
-main_build:
+main_build: ex_build
 	$(OCAMLBUILD) $(TARGETS)
 
 
@@ -38,16 +39,22 @@ main_build:
 dev: dev_build utest test
 
 .PHONY: dev_build
-dev_build: generated
+dev_build: ERLBUILDOPT = +debug_info -DEUNIT -Wall
+dev_build: generated ex_build
 	$(OCAMLBUILD) $(TEST_TARGETS)
 
 
-.PHONY: install uninstall
+.PHONY: ex_build
+ex_build: ERLBUILDOPT = +debug_info -DEUNIT -Wall
+ex_build: $(EX_BEAM)
+
+
+.PHONY: install
 install: uninstall main_build
 	test ! -f _build/$(XARCHIVE) || extra="_build/$(XARCHIVE) _build/"`basename $(XARCHIVE) .cmxa`".a" ; \
 	ocamlfind install $(NAME) META _build/$(NAME)/*.mli _build/$(NAME)/*.cmi _build/$(NAME).cmi _build/$(ARCHIVE) $$extra
 
-
+.PHONY: uninstall
 uninstall:
 	ocamlfind remove $(NAME)
 
@@ -62,7 +69,14 @@ clean:
 .PHONY: test
 # no rule dependency ... rule used as a function
 test:
-	@for i in ${TEST_SHELL} ; do echo -n "Running '$$i': " ; $$i > /dev/null 2>&1; r=$$? && echo "$$r" ; done
+	# start erlang first (ensure epmd is running)
+	@echo "Run and stop a distributed erlang node to ensure epmd is running."
+	erl -sname e1 -setcookie cookie -noshell -s init stop
+	@for i in ${TEST_SHELL} ; do \
+		echo -n "Running '$$i': " ; \
+		$$i > /dev/null 2>&1 ; \
+		r=$$? && echo "$$r" ; \
+	done
 
 .PHONY: utest
 # no rule dependency ... rule used as a function
@@ -76,7 +90,12 @@ generated: test/dataSet.ml
 test/dataSet.ml: beam/datagen.beam
 	erl -noshell -pa beam -s datagen doit -s init stop > test/dataSet.ml
 
-beam/datagen.beam: test/datagen.erl
+beam/%.beam : test/%.erl
 	mkdir -p beam
-	erlc -o beam test/datagen.erl
+	erlc ${ERLBUILDOPT} -o beam $<
+
+beam/%.beam : ex/%.erl
+	mkdir -p beam
+	erlc ${ERLBUILDOPT} -o beam $<
+
 
