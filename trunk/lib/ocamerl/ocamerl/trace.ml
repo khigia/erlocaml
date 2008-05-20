@@ -9,6 +9,7 @@ type output = Default | File
 let _channel = ref stderr
 let _channelType = ref Default
 let _curlvl = ref lvl_warning
+let _mutex = Mutex.create ()
 
 let set_level lvl =
     _curlvl := lvl
@@ -71,9 +72,11 @@ let _level_to_string lvl = match lvl with
     | n -> Printf.sprintf "%d" n
 
 let p lvl who f =
-    let printer = if !_curlvl <= lvl then Printf.fprintf else Printf.ifprintf in
+    let lock () = Mutex.lock _mutex in
+    let unlock channel = Mutex.unlock _mutex in
     let thrID = Thread.id (Thread.self ()) in
     let fmt = "%s: %s: thr %03i: %s: " ^^ f in
+    let printer = if !_curlvl <= lvl then begin lock (); Printf.kfprintf unlock end else Printf.ifprintf in
     printer !_channel fmt (_now ()) (_level_to_string lvl) thrID who
 
 let flush () =
