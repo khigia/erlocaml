@@ -26,6 +26,9 @@ module Mbox = struct
     let _set_name self name =
         self.name <- Some name
 
+    let e_pid self =
+        self.pid
+
     let pid self =
         Eterm.ET_pid self.pid
 
@@ -55,19 +58,15 @@ module Mbox = struct
 
     let stop_activity mbox =
         let _ = Fifo.put mbox.queue ctrl_stop in
-        let _ = match mbox.activity with
-        (* this may dead-lock ... *)
-        | Some thr -> Thread.join thr;
-        | None -> ()
-        in
         Trace.dbg
             "Enode"
-            "Mbox (%s%s) activity is stopped\n"
+            "Mbox (%s%s) activity is stopping\n"
             (Eterm.e_pid_to_string mbox.pid)
             (match name mbox with
             | Some name -> ", " ^ name
             | None -> ""
             );
+        Trace.flush ();
         mbox.activity <- None
 
 end (* module Mbox *)
@@ -78,12 +77,14 @@ module MboxManager : sig
     val create: unit -> t
     val mboxes: t -> Mbox.t list
     val make_mbox: t -> Eterm.e_pid -> Mbox.t
+    val destroy_mbox: t -> Mbox.t -> unit
     val register: t -> Mbox.t -> string -> unit
     val unregister: t -> Mbox.t -> unit
     val find_by_name: t -> string -> Mbox.t
     val find_by_pid: t -> Eterm.e_pid -> Mbox.t
 end = struct
 
+    (* TODO all that surely need to be thread safe ... *)
     type t = {
         pidMboxMap: (Eterm.e_pid, Mbox.t) Hashtbl.t;
         nameMboxMap: (string, Mbox.t) Hashtbl.t;
@@ -104,6 +105,16 @@ end = struct
         let mbox = Mbox._create pid in
         Hashtbl.add self.pidMboxMap pid mbox;
         mbox
+
+    let destroy_mbox self mbox =
+        begin
+        match Mbox.name mbox with
+        | Some name ->
+            Hashtbl.remove self.nameMboxMap name
+        | None -> ()
+        end;
+        Hashtbl.remove self.pidMboxMap (Mbox.e_pid mbox);
+        Mbox.stop_activity mbox
 
     let register self mbox name =
         let _ = Mbox._set_name mbox name in
@@ -199,6 +210,9 @@ let create_mbox node =
     let pid = PidManager.make_pid node.pids in
     let mbox = MboxManager.make_mbox node.mboxes pid in
     mbox
+
+let destroy_mbox node mbox =
+    MboxManager.destroy_mbox node.mboxes mbox
 
 let register_mbox node mbox name =
     MboxManager.register node.mboxes mbox name

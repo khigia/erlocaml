@@ -25,6 +25,9 @@ type t
 (** Create a new Mbox (equivalent of erlang process message queue). *)
 val create_mbox: t -> Mbox.t
 
+(** Remove an existing Mbox from node. *)
+val destroy_mbox: t -> Mbox.t -> unit
+
 (** Register an mbox. *)
 val register_mbox: t -> Mbox.t -> string -> unit
 
